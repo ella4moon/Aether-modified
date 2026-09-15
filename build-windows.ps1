@@ -31,6 +31,8 @@ try {
     Remove-Item -LiteralPath $tempDir -Recurse -Force
 }
 
+& ./src-tauri/binaries/fetch-system-tunnel.ps1
+
 & npm ci
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
 & npm run build
@@ -41,6 +43,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Frontend lint failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Final-proxy tests failed.' }
 & cargo test --manifest-path src-tauri/Cargo.toml
 if ($LASTEXITCODE -ne 0) { throw 'Backend tests failed.' }
+& cargo test --locked --manifest-path src-tauri/whole-laptop/Cargo.toml
+if ($LASTEXITCODE -ne 0) { throw 'Whole-laptop routing tests failed.' }
 & npm run tauri build
 if ($LASTEXITCODE -ne 0) { throw 'Desktop build failed.' }
 Write-Host 'Build complete. Installers are in src-tauri/target/release/bundle/.'

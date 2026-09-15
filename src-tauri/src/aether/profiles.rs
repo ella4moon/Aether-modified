@@ -186,6 +186,9 @@ pub struct ConnectionProfile {
     /// Applied by the GUI after the Aether tunnel, never as AETHER_UPSTREAM.
     #[serde(default)]
     pub final_proxy: FinalProxyProfile,
+    /// Windows TUN capture. Off for existing profiles and fresh installs.
+    #[serde(default)]
+    pub whole_laptop: bool,
     pub protocol: Protocol,
     pub scan_mode: ScanMode,
     pub ip_version: IpVersion,
@@ -513,6 +516,7 @@ mod tests {
         let p: ConnectionProfile = serde_json::from_str(json).unwrap();
         assert_eq!(p.bind_address, "127.0.0.1:1819");
         assert_eq!(p.masque_noize, MasqueNoize::Firewall);
+        assert!(!p.whole_laptop, "upgrading must not enable Windows capture");
     }
 
     #[test]
@@ -580,6 +584,7 @@ impl Default for ConnectionProfile {
         // Mirrors Aether's own defaults.
         Self {
             final_proxy: FinalProxyProfile::default(),
+            whole_laptop: false,
             protocol: Protocol::Auto,
             scan_mode: ScanMode::Balanced,
             ip_version: IpVersion::V4,

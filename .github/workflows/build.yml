@@ -74,6 +74,11 @@ jobs:
           Expand-Archive aether.zip -DestinationPath aether-extract
           Move-Item aether-extract/aether.exe src-tauri/binaries/aether.exe
 
+      - name: Fetch Windows whole-laptop component
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./src-tauri/binaries/fetch-system-tunnel.ps1
+
       - run: npm ci
 
       # Separate native commands so PowerShell cannot mask an earlier failure
@@ -89,6 +94,19 @@ jobs:
 
       - name: Test desktop backend
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Test whole-laptop routing policy
+        run: cargo test --locked --manifest-path src-tauri/whole-laptop/Cargo.toml
+
+      - name: Validate config with bundled Windows sing-box
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $config = & cargo run --quiet --locked --manifest-path src-tauri/whole-laptop/Cargo.toml --example config
+          if ($LASTEXITCODE -ne 0) { throw 'Could not generate the whole-laptop configuration.' }
+          $config | Set-Content -Path "$env:RUNNER_TEMP/whole-laptop-check.json" -Encoding utf8NoBOM
+          & ./src-tauri/binaries/sing-box.exe check -c "$env:RUNNER_TEMP/whole-laptop-check.json"
+          if ($LASTEXITCODE -ne 0) { throw 'The bundled whole-laptop configuration is invalid.' }
 
       - uses: tauri-apps/tauri-action@v0
         env:

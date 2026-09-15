@@ -46,12 +46,14 @@ interface ConnectionState {
   setRouteDirect: (route_direct: string) => void;
   setRoutesFile: (routes_file: string) => void;
   setFinalProxy: (patch: Partial<ConnectionProfile["final_proxy"]>) => void;
+  setWholeLaptop: (whole_laptop: boolean) => void;
   retryAfterSidecarError: () => void;
 }
 
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
   status: { state: "Idle" },
   profile: {
+    whole_laptop: false,
     final_proxy: { enabled: false, kind: "socks5", host: "", port: "1080", authenticate: false, username: "", password: "" },
     protocol: "auto",
     scan_mode: "balanced",
@@ -173,7 +175,12 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     set((s) => ({ profile: { ...s.profile, routes_file } })),
 
   setFinalProxy: (patch) =>
-    set((s) => ({ profile: { ...s.profile, final_proxy: { ...s.profile.final_proxy, ...patch } } })),
+    set((s) => ({ profile: { ...s.profile,
+      whole_laptop: patch.enabled === false ? false : s.profile.whole_laptop,
+      final_proxy: { ...s.profile.final_proxy, ...patch } } })),
+
+  setWholeLaptop: (whole_laptop) =>
+    set((s) => ({ profile: { ...s.profile, whole_laptop } })),
 
   // Clears the fallback screen so the user can attempt Connect again (e.g.
   // after fixing a broken install) — the next connect() call will re-set

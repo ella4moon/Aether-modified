@@ -1,6 +1,6 @@
 [package]
 name = "aether-gui"
-version = "0.7.0"
+version = "0.8.0"
 description = "One-click GUI for the Aether censorship-circumvention tunnel"
 edition = "2021"
 
@@ -9,6 +9,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 aether-exit-proxy = { path = "exit-proxy" }
+aether-whole-laptop = { path = "whole-laptop" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-store = "2"
 serde = { version = "1", features = ["derive"] }

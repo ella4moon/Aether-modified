@@ -20,6 +20,7 @@ use tauri::{AppHandle, Emitter, Manager};
 pub struct AetherManager {
     session: Option<PtySession>,
     final_proxy: Option<FinalProxyServer>,
+    whole_laptop: Option<aether_whole_laptop::Session>,
     state: ConnectionState,
     user_requested_stop: bool,
     retry_count: u32,
@@ -32,6 +33,7 @@ impl AetherManager {
         Self {
             session: None,
             final_proxy: None,
+            whole_laptop: None,
             state: ConnectionState::Idle,
             user_requested_stop: false,
             retry_count: 0,
@@ -54,12 +56,39 @@ struct Attempt {
     data_dir: PathBuf,
     profile: ConnectionProfile,
     generation: u64,
+    whole_laptop_request: Option<aether_whole_laptop::Request>,
 }
 
 fn app_data_dir(app: &AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
         .unwrap_or_else(|_| std::env::temp_dir())
+}
+
+pub fn whole_laptop_support(app: &AppHandle) -> aether_whole_laptop::Support {
+    let sidecar = app
+        .path()
+        .resource_dir()
+        .unwrap_or_default()
+        .join("binaries/sing-box.exe");
+    aether_whole_laptop::support(&sidecar)
+}
+
+pub fn restore_normal_networking(
+    app: &AppHandle,
+    manager: &Arc<Mutex<AetherManager>>,
+) -> Result<(), AetherError> {
+    // Hold the connection lock so a concurrent Connect cannot race recovery.
+    let mgr = manager.lock().unwrap();
+    if !matches!(
+        mgr.state,
+        ConnectionState::Idle | ConnectionState::Error { .. }
+    ) {
+        return Err(AetherError::WholeLaptop(
+            "Disconnect before restoring normal networking.".into(),
+        ));
+    }
+    aether_whole_laptop::recover(&app_data_dir(app)).map_err(AetherError::WholeLaptop)
 }
 
 fn resolve_binary(app: &AppHandle) -> Result<PathBuf, AetherError> {
@@ -103,6 +132,22 @@ pub fn start_connect(
     let binary = resolve_binary(&app)?;
     let data_dir = app_data_dir(&app);
     std::fs::create_dir_all(&data_dir).map_err(|e| AetherError::Internal(e.to_string()))?;
+    let whole_laptop_request = if profile.whole_laptop {
+        aether_whole_laptop::validate_mode(bind, profile.final_proxy.enabled)
+            .map_err(AetherError::WholeLaptop)?;
+        let request = aether_whole_laptop::Request {
+            local_addr: bind,
+            engine_path: binary
+                .canonicalize()
+                .map_err(|e| AetherError::WholeLaptop(e.to_string()))?,
+            sidecar_path: binary.with_file_name("sing-box.exe"),
+            data_dir: data_dir.clone(),
+        };
+        aether_whole_laptop::preflight(&request).map_err(AetherError::WholeLaptop)?;
+        Some(request)
+    } else {
+        None
+    };
     let generation = {
         let mut mgr = manager.lock().unwrap();
         if !matches!(
@@ -129,6 +174,7 @@ pub fn start_connect(
             data_dir,
             profile,
             generation,
+            whole_laptop_request,
         },
     )
 }
@@ -217,6 +263,7 @@ fn finish_error(
     if !mgr.is_current(attempt.generation) {
         return;
     }
+    mgr.whole_laptop = None;
     if let Some(session) = mgr.session.as_mut() {
         session.kill();
     }
@@ -243,6 +290,7 @@ fn handle_unexpected_failure(
         if !mgr.is_current(attempt.generation) {
             return;
         }
+        mgr.whole_laptop = None;
         if let Some(session) = mgr.session.as_mut() {
             session.kill();
         }
@@ -352,9 +400,23 @@ fn monitor_connect(
                 );
                 return;
             }
+            drop(mgr);
+            match activate_whole_laptop(&app, &manager, &attempt) {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(error) => {
+                    finish_error(&app, &manager, &attempt, error, "whole_laptop");
+                    return;
+                }
+            }
+            let mut mgr = manager.lock().unwrap();
+            if !mgr.is_current(attempt.generation) {
+                return;
+            }
             mgr.state = ConnectionState::Connected {
                 socks_addr: attempt.profile.bind_address.clone(),
                 connected_at_ms: now_millis(),
+                whole_laptop: attempt.profile.whole_laptop,
             };
             mgr.retry_count = 0;
             let _ = app.emit(STATUS_EVENT, &mgr.state);
@@ -377,11 +439,55 @@ fn monitor_connect(
     }
 }
 
+fn activate_whole_laptop(
+    app: &AppHandle,
+    manager: &Arc<Mutex<AetherManager>>,
+    attempt: &Attempt,
+) -> Result<bool, String> {
+    let Some(request) = &attempt.whole_laptop_request else {
+        return Ok(true);
+    };
+    {
+        let mut mgr = manager.lock().unwrap();
+        if !mgr.is_current(attempt.generation) {
+            return Ok(false);
+        }
+        mgr.state = ConnectionState::StartingWholeLaptop;
+        let _ = app.emit(STATUS_EVENT, &mgr.state);
+        mgr.whole_laptop = Some(aether_whole_laptop::Session::start(request.clone())?);
+    }
+    loop {
+        std::thread::sleep(Duration::from_millis(200));
+        let mut mgr = manager.lock().unwrap();
+        if !mgr.is_current(attempt.generation) {
+            return Ok(false);
+        }
+        if mgr.session.as_mut().and_then(|s| s.try_wait()).is_some() {
+            return Err(
+                "Aether stopped while starting whole-laptop routing. Try connecting again.".into(),
+            );
+        }
+        if mgr
+            .whole_laptop
+            .as_mut()
+            .ok_or("Whole-laptop helper is missing")?
+            .poll()?
+        {
+            return Ok(true);
+        }
+    }
+}
+
 fn monitor_connected(app: AppHandle, manager: Arc<Mutex<AetherManager>>, attempt: Attempt) {
     loop {
         std::thread::sleep(Duration::from_millis(500));
         let mut mgr = manager.lock().unwrap();
         if !mgr.is_current(attempt.generation) {
+            return;
+        }
+        if let Some(error) = mgr.whole_laptop.as_mut().and_then(|s| s.poll().err()) {
+            drop(mgr);
+            finish_error(&app, &manager, &attempt, error, "whole_laptop");
             return;
         }
         if let Some(exit) = mgr.session.as_mut().and_then(|s| s.try_wait()) {
@@ -403,7 +509,7 @@ pub fn request_disconnect(
     app: &AppHandle,
     manager: &Arc<Mutex<AetherManager>>,
 ) -> Result<(), AetherError> {
-    let generation = {
+    let (generation, mut whole_laptop) = {
         let mut mgr = manager.lock().unwrap();
         if matches!(
             mgr.state,
@@ -414,23 +520,27 @@ pub fn request_disconnect(
         mgr.user_requested_stop = true;
         mgr.generation = mgr.generation.wrapping_add(1);
         mgr.retry_count = 0;
+        let whole_laptop = mgr.whole_laptop.take();
         // Close the public listener AND every active/probing relay socket now.
         mgr.final_proxy = None;
         if let Some(session) = mgr.session.as_ref() {
             session.send_ctrl_c();
         }
-        if mgr.session.is_none() {
+        if mgr.session.is_none() && whole_laptop.is_none() {
             mgr.state = ConnectionState::Idle;
             let _ = app.emit(STATUS_EVENT, &mgr.state);
             return Ok(());
         }
         mgr.state = ConnectionState::Disconnecting;
         let _ = app.emit(STATUS_EVENT, &mgr.state);
-        mgr.generation
+        (mgr.generation, whole_laptop)
     };
     let app = app.clone();
     let manager = Arc::clone(manager);
     std::thread::spawn(move || {
+        // Closing the helper pipe restores routes; wait off the UI thread.
+        let cleanup = whole_laptop.as_mut().map(|s| s.stop()).transpose();
+        drop(whole_laptop);
         let deadline = Instant::now() + status::GRACEFUL_SHUTDOWN_GRACE;
         loop {
             std::thread::sleep(Duration::from_millis(200));
@@ -447,7 +557,13 @@ pub fn request_disconnect(
                 }
                 mgr.session = None;
                 orphan::clear_pid(&app_data_dir(&app));
-                mgr.state = ConnectionState::Idle;
+                mgr.state = match cleanup {
+                    Err(message) => ConnectionState::Error {
+                        message,
+                        phase: "whole_laptop".into(),
+                    },
+                    Ok(_) => ConnectionState::Idle,
+                };
                 let _ = app.emit(STATUS_EVENT, &mgr.state);
                 return;
             }
@@ -471,6 +587,7 @@ pub fn shutdown_blocking(manager: &Arc<Mutex<AetherManager>>, data_dir: &Path) {
     let mut mgr = manager.lock().unwrap();
     mgr.user_requested_stop = true;
     mgr.generation = mgr.generation.wrapping_add(1);
+    mgr.whole_laptop = None;
     mgr.final_proxy = None;
     if let Some(session) = mgr.session.as_mut() {
         session.send_ctrl_c();

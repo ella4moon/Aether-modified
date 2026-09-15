@@ -6,7 +6,8 @@ export type ConnectionStatus =
   | { state: "Launching" }
   | { state: "Connecting" }
   | { state: "CheckingProxy" }
-  | { state: "Connected"; socks_addr: string; connected_at_ms: number }
+  | { state: "StartingWholeLaptop" }
+  | { state: "Connected"; socks_addr: string; connected_at_ms: number; whole_laptop: boolean }
   | { state: "Reconnecting"; attempt: number; max_attempts: number }
   | { state: "Disconnecting" }
   | { state: "Error"; message: string; phase: string };
@@ -30,6 +31,7 @@ export interface FinalProxyProfile {
 
 export interface ConnectionProfile {
   final_proxy: FinalProxyProfile;
+  whole_laptop: boolean;
   protocol: Protocol;
   scan_mode: ScanMode;
   ip_version: IpVersion;

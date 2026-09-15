@@ -11,6 +11,12 @@ See [FINAL-PROXY.md](FINAL-PROXY.md) for setup and build instructions, and
 [VERIFICATION.md](VERIFICATION.md) for test results and remaining validation limits.
 The desktop application retains the upstream Aether-GUI name.
 
+**New in 0.8.0:** [Whole laptop on Windows 11](WHOLE-LAPTOP.md) sends ordinary
+applications' internet TCP and DNS through the same final proxy without
+application proxy settings. Enable it in Advanced while running as administrator.
+Other UDP is blocked; the option is active only while connected and is not a
+kill switch.
+
 [![Build](https://github.com/ella4moon/Aether-modified/actions/workflows/build.yml/badge.svg)](https://github.com/ella4moon/Aether-modified/actions/workflows/build.yml)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)

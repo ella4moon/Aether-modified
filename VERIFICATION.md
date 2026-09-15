@@ -1,5 +1,47 @@
 # Verification of the final-proxy changes
 
+## Windows whole-laptop option, version 0.8.0 (2026-09-15)
+
+| Local check | Result |
+| --- | --- |
+| TypeScript/Vite production build and ESLint | Passed |
+| Linux desktop backend compile and unit tests | Passed; 22 tests, including old-profile capture defaulting to off |
+| Existing final-proxy relay suite | 12 tests passed |
+| Whole-laptop routing policy suite | 4 tests passed |
+| Windows x64 whole-laptop library and test compilation, Clippy with warnings denied | Passed using the Windows MSVC target |
+| Generated config checked by pinned sing-box 1.14.1 on Linux | Passed; no adapter started |
+| Windows distribution archive SHA-256 | Matched the pinned digest |
+| Git whitespace check | Passed |
+
+The new policy tests check both IP families, loopback/final-proxy prerequisites,
+the DNS-over-HTTPS detour through the local relay, rejection of other UDP/ICMP,
+and exact executable-path matching for Aether's transport exception (including
+case differences, the Windows extended-path prefix, and regex metacharacters).
+Existing relay tests still verify the order of the Aether and final proxy hops,
+authentication, socket shutdown and the absence of a direct fallback.
+
+Windows-only subprocess tests were added for lifetime-pipe EOF and forced helper
+termination. They exercise the actual hidden-console and Windows job-object code
+without changing routes. Their two subprocess fixtures are marked ignored to
+prevent the test harness from invoking them directly; the parent tests invoke
+them explicitly. These tests were **compiled**, not executed, in this Linux
+environment. A fresh Windows workflow run executes them and checks the generated
+config with the bundled Windows `sing-box.exe` before creating installers.
+
+The Windows installer, administrator check, real Wintun adapter, live DNS and
+traffic forwarding, recovery button, sleep/resume, and network changes still
+need a **native Windows 11 test**. No claim is made here of a Windows end-to-end
+run or observed exit IP. Use the [setup and recovery instructions](WHOLE-LAPTOP.md),
+test a fresh connection with application proxy overrides disabled, and confirm
+that Disconnect restores networking. Whole-laptop mode is off by default and
+is not a kill switch; initial connection, reconnect and post-crash cleanup restore
+ordinary networking. UDP-dependent applications are outside this TCP relay's
+capabilities.
+
+The Linux backend tests again used the isolated system-library files and one
+test code-generation unit for GTK. The existing Linux-only unused-import warning
+in `src/focus.rs` remains; the Windows helper has no Clippy warnings.
+
 ## Platform socket fix (2026-09-15)
 
 The first [GitHub Actions run](https://github.com/ella4moon/Aether-modified/actions/runs/34933354701)

@@ -12,6 +12,9 @@ use state::AppState;
 use tauri::{Manager, WindowEvent};
 
 fn main() {
+    if let Some(code) = aether_whole_laptop::run_helper_if_requested() {
+        std::process::exit(code);
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(AppState::default())
@@ -35,6 +38,8 @@ fn main() {
             commands::set_default_profile,
             commands::get_close_to_tray,
             commands::set_close_to_tray,
+            commands::get_whole_laptop_support,
+            commands::restore_normal_networking,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

@@ -14,9 +14,10 @@ version = "0.1.0"
 
 [[package]]
 name = "aether-gui"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "aether-exit-proxy",
+ "aether-whole-laptop",
  "portable-pty",
  "serde",
  "serde_json",
@@ -24,6 +25,15 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-store",
  "thiserror 1.0.69",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "aether-whole-laptop"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
  "windows-sys 0.59.0",
 ]
 

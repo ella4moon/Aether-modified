@@ -16,6 +16,7 @@ import { BindAddressField } from "@/components/BindAddressField";
 import { ZeroTrustSettings } from "@/components/ZeroTrustSettings";
 import { RoutingSettings } from "@/components/RoutingSettings";
 import { FinalProxySettings } from "@/components/FinalProxySettings";
+import { WholeLaptopSettings } from "@/components/WholeLaptopSettings";
 import { useConnectionStore } from "@/state/connectionStore";
 
 function FieldRow({
@@ -122,6 +123,9 @@ export function AdvancedPanel() {
             </FieldRow>
             <FieldRow label="Final proxy" tooltip="Connect to your proxy through Aether. Websites see the final proxy's exit IP.">
               <FinalProxySettings />
+            </FieldRow>
+            <FieldRow label="Whole laptop (Windows)">
+              <WholeLaptopSettings />
             </FieldRow>
             <FieldRow
               label="Zero Trust (organization)"

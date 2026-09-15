@@ -12,6 +12,7 @@ function phaseOf(status: ConnectionStatus): Phase {
     case "Launching":
     case "Connecting":
     case "CheckingProxy":
+    case "StartingWholeLaptop":
     case "Reconnecting":
     case "Disconnecting":
       return "connecting";

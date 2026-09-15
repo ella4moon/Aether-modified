@@ -14,6 +14,8 @@ pub enum AetherError {
     NotConnected,
     #[error("final proxy: {0}")]
     FinalProxy(String),
+    #[error("whole laptop: {0}")]
+    WholeLaptop(String),
     #[error("internal error: {0}")]
     Internal(String),
 }

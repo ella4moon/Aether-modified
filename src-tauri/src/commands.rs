@@ -48,3 +48,19 @@ pub fn get_close_to_tray() -> bool {
 pub fn set_close_to_tray(app: AppHandle, enabled: bool) {
     tray::set_close_to_tray(&app, enabled);
 }
+
+#[tauri::command]
+pub fn get_whole_laptop_support(app: AppHandle) -> aether_whole_laptop::Support {
+    aether::whole_laptop_support(&app)
+}
+
+#[tauri::command]
+pub async fn restore_normal_networking(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), AetherError> {
+    let manager = state.manager.clone();
+    tauri::async_runtime::spawn_blocking(move || aether::restore_normal_networking(&app, &manager))
+        .await
+        .map_err(|e| AetherError::WholeLaptop(e.to_string()))?
+}

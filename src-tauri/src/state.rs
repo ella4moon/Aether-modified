@@ -20,12 +20,14 @@ pub enum ConnectionState {
     Launching,
     Connecting,
     CheckingProxy,
+    StartingWholeLaptop,
     /// `connected_at_ms` is an absolute UNIX-epoch timestamp (ms) rather than
     /// a pre-computed elapsed duration, so the frontend can render a live-
     /// updating session timer without needing another event from the backend.
     Connected {
         socks_addr: String,
         connected_at_ms: u64,
+        whole_laptop: bool,
     },
     Reconnecting {
         attempt: u32,

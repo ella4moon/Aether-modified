@@ -1,5 +1,8 @@
 # Final proxy support for Aether-GUI
 
+For apps without proxy settings on Windows 11, see the new
+[Whole laptop option](WHOLE-LAPTOP.md) in version 0.8.0.
+
 This modified source is published at [ella4moon/Aether-modified](https://github.com/ella4moon/Aether-modified)
 and is based on [MatinSenPai/Aether-GUI](https://github.com/MatinSenPai/Aether-GUI) commit
 `93314fcd97bf6b446d537aac9538b01bef04c7a0` (version 0.7.0).

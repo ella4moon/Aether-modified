@@ -124,8 +124,12 @@ export function ConnectionStatusLine() {
       primary = "Checking final proxy…";
       secondary = "Verifying the connection through Aether";
       break;
+    case "StartingWholeLaptop":
+      primary = "Starting whole-laptop routing…";
+      secondary = "Setting up the Windows virtual adapter";
+      break;
     case "Connected":
-      primary = finalProxy ? "Connected via final proxy" : "Connected";
+      primary = status.whole_laptop ? "Whole laptop via final proxy" : finalProxy ? "Connected via final proxy" : "Connected";
       secondary = elapsed;
       break;
     case "Disconnecting":
@@ -163,7 +167,9 @@ export function ConnectionStatusLine() {
         </motion.span>
       </AnimatePresence>
       {status.state === "Connected" && (
-        <span className="font-mono text-xs text-muted-foreground">SOCKS5 {status.socks_addr}</span>
+        <span className="font-mono text-xs text-muted-foreground">
+          {status.whole_laptop ? "TCP + DNS · Other UDP blocked" : `SOCKS5 ${status.socks_addr}`}
+        </span>
       )}
       {status.state === "Connecting" && <ScanProgressBar percent={scanPercent} />}
     </div>
