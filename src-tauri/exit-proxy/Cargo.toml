@@ -1,0 +1,8 @@
+[package]
+name = "aether-exit-proxy"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+description = "A final SOCKS5 or HTTP CONNECT proxy reached through Aether"
+
+[dependencies]
