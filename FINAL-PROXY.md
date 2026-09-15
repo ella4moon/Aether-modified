@@ -1,7 +1,8 @@
 # Final proxy support for Aether-GUI
 
 For apps without proxy settings on Windows 11, see the new
-[Whole laptop option](WHOLE-LAPTOP.md) in version 0.8.0.
+[Whole laptop option](WHOLE-LAPTOP.md). Version **0.9.0** adds native UDP support
+to both the local relay and whole-laptop mode.
 
 This modified source is published at [ella4moon/Aether-modified](https://github.com/ella4moon/Aether-modified)
 and is based on [MatinSenPai/Aether-GUI](https://github.com/MatinSenPai/Aether-GUI) commit
@@ -20,9 +21,12 @@ proxy in the GUI. WireGuard is supported with the same engine and settings.
    values from your actual proxy service; the example is a placeholder.
 5. If needed, turn on **Username and password** and enter both locally in the app.
    Credentials are kept in memory and must be entered again after restarting.
-6. Click **Connect**. The app checks the final proxy through Aether before it
+6. To forward UDP, choose **SOCKS5** and turn on **Forward UDP**. Your provider
+   must support **UDP ASSOCIATE** at that endpoint; SOCKS5 support alone does not
+   guarantee this. HTTP CONNECT can still be used for TCP.
+7. Click **Connect**. The app checks the final proxy through Aether before it
    displays **Connected via final proxy**.
-7. Use the displayed local SOCKS5 address in your application. Its default is
+8. Use the displayed local SOCKS5 address in your application. Its default is
    `127.0.0.1:1819`, the same address the unmodified GUI uses.
 
 The connection order is:
@@ -35,6 +39,9 @@ proxy may use a different exit address for each connection.
 ## Supported behavior
 
 - TCP connections, including normal HTTPS websites, WebSockets and other TCP apps.
+- Native UDP datagrams with **Forward UDP** enabled, including UDP applications
+  and QUIC where the final proxy and destination permit them. The local app must
+  use SOCKS5 UDP ASSOCIATE, or use whole-laptop mode on Windows.
 - SOCKS5 final proxies with no authentication or username/password authentication.
 - HTTP CONNECT final proxies with no authentication or HTTP Basic authentication.
 - Hostnames, IPv4 and IPv6 destinations. Names are passed to the proxies;
@@ -48,18 +55,25 @@ proxy may use a different exit address for each connection.
 
 ## Limits that affect configuration
 
-- This feature applies to applications using the displayed SOCKS5 listener.
-  It does not configure a system-wide proxy or a virtual network adapter.
-- UDP ASSOCIATE and SOCKS BIND return "command not supported" while final-proxy
-  mode is enabled. UDP and QUIC are not forwarded by this relay.
+- This relay serves apps using the displayed SOCKS5 listener. The optional
+  [Whole laptop mode](WHOLE-LAPTOP.md) supplies Windows virtual-adapter capture
+  for apps without SOCKS support.
+- **Forward UDP** is off on upgrade so existing TCP-only proxy setups still work.
+  Enable it to use UDP in either mode. A rejected UDP association fails the
+  connection check with an actionable error; no direct UDP path is selected.
+- ICMP/ping and SOCKS BIND remain unsupported. Ordinary HTTP CONNECT supports
+  TCP only. Fragmented SOCKS5 UDP frames, and oversized datagrams that cannot
+  fit both SOCKS headers, are dropped.
 - The final proxy must be reachable from inside the Aether tunnel. A proxy
   running only on your laptop's `127.0.0.1` is not a reachable remote exit.
 - HTTP CONNECT describes the connection to the proxy. HTTPS websites work
   through it, but TLS-wrapped `https://` proxy endpoints, SOCKS4 and other proxy
   protocols are not implemented.
 - The startup check asks the final proxy to open `example.com:443`, then closes
-  it without sending application data. That destination must be allowed by your
-  proxy. This checks both CONNECT hops; it does not measure or attest an exit IP.
+  it without sending application data. With **Forward UDP** enabled, it also
+  checks UDP ASSOCIATE on both Aether and the final proxy. This confirms the
+  control path, not delivery to every UDP port or a measured exit IP. A provider
+  can accept associations yet block particular destinations or UDP ports.
 - Aether destination routing lists and the organization Gateway proxy are
   inactive in this mode. The core carries the connection to your final proxy;
   destination policy should be configured at that proxy. These saved settings
@@ -95,15 +109,29 @@ Proxy credentials are not needed for builds or tests.
 
 ## Implementation and verification
 
-`src-tauri/exit-proxy` is a small Rust library with no third-party dependencies.
+`src-tauri/exit-proxy` uses Rust and Mio for portable socket readiness.
 Its only outbound TCP dial is to the Aether loopback listener. It then performs
 SOCKS CONNECT to the final proxy and SOCKS CONNECT or HTTP CONNECT to the target.
 The Aether process uses an internal loopback port while the GUI relay owns the
 usual application-facing port.
 
+For UDP it keeps two SOCKS5 control connections alive: one to the final proxy
+through Aether, and a UDP association with Aether itself. Each client datagram
+gets a second SOCKS5 UDP envelope addressed to the final proxy's UDP relay, then
+is sent **only to Aether's loopback UDP relay**. Aether carries that UDP packet
+through its tunnel, and the final proxy forwards the inner packet. Replies
+unwrap in reverse order. Data remains datagrams; TCP carries authentication and
+association control. Closing any control connection or Disconnect ends the
+association. The GUI never sends UDP directly to the remote proxy or destination.
+
+This uses the existing [Aether 1.5.0 UDP implementation](https://github.com/CluvexStudio/Aether/blob/v1.5.0/aether/src/socks.rs).
+WireGuard's tunnel transport was already UDP-capable; the earlier limitation was
+in the GUI's final-proxy relay, which originally implemented TCP CONNECT only.
+
 The loopback integration tests use mock Aether and final-proxy servers. They
-check hop order, remote hostname handling, authentication, coalesced response
-bytes, half-close behavior, failures, unsupported UDP, cancellation and deadlines.
+check TCP and UDP hop order, remote hostname handling, authentication, coalesced
+response bytes, half-close behavior, datagram
+boundaries, invalid source/fragment rejection, cancellation and deadlines.
 They do not contact a real WARP gateway or your private proxy.
 
 ```powershell

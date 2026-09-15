@@ -137,6 +137,7 @@ pub fn start_connect(
             .map_err(AetherError::WholeLaptop)?;
         let request = aether_whole_laptop::Request {
             local_addr: bind,
+            udp_enabled: profile.final_proxy.udp_enabled,
             engine_path: binary
                 .canonicalize()
                 .map_err(|e| AetherError::WholeLaptop(e.to_string()))?,
@@ -372,13 +373,18 @@ fn monitor_connect(
                 let _ = app.emit(
                     LOG_EVENT,
                     LogEvent {
-                        line: "Checking the final proxy through Aether…".into(),
+                        line: if attempt.profile.final_proxy.udp_enabled {
+                            "Checking TCP and UDP associations through Aether and the final proxy…"
+                                .into()
+                        } else {
+                            "Checking the final proxy through Aether…".into()
+                        },
                         timestamp: now_millis(),
                     },
                 );
                 if let Err(error) = probe.verify() {
                     finish_error(&app, &manager, &attempt,
-                        format!("Final proxy check failed: {error}. Check its address, credentials and permission to connect to example.com:443."),
+                        format!("Final proxy check failed: {error}. Check its address, credentials and permission to connect to example.com:443. If UDP is enabled, both hops must also accept UDP ASSOCIATE."),
                         "final_proxy");
                     return;
                 }
@@ -417,6 +423,8 @@ fn monitor_connect(
                 socks_addr: attempt.profile.bind_address.clone(),
                 connected_at_ms: now_millis(),
                 whole_laptop: attempt.profile.whole_laptop,
+                udp_enabled: attempt.profile.final_proxy.enabled
+                    && attempt.profile.final_proxy.udp_enabled,
             };
             mgr.retry_count = 0;
             let _ = app.emit(STATUS_EVENT, &mgr.state);

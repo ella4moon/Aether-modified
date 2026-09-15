@@ -124,10 +124,23 @@ export function FinalProxySettings() {
               </p>
             </div>
           )}
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">Forward UDP</span>
+            <Switch
+              checked={proxy.udp_enabled}
+              disabled={locked || proxy.kind !== "socks5"}
+              onCheckedChange={(udp_enabled) => update({ udp_enabled })}
+              aria-label="Forward UDP through final proxy"
+            />
+          </div>
           <p className="text-[11px] leading-4 text-muted-foreground">
-            TCP only. Connections fail if the final proxy fails. UDP is
-            disabled. Aether routing rules and the organization Gateway are
-            inactive in this mode.
+            {proxy.kind === "socks5"
+              ? "UDP requires your proxy to support SOCKS5 UDP ASSOCIATE. Applies to both this local SOCKS5 listener and Whole laptop."
+              : "HTTP CONNECT carries TCP only. Choose a UDP-capable SOCKS5 endpoint to forward UDP."}
+          </p>
+          <p className="text-[11px] leading-4 text-muted-foreground">
+            Connections fail if the final proxy fails. Aether routing rules and
+            the organization Gateway are inactive in this mode.
           </p>
         </>
       )}

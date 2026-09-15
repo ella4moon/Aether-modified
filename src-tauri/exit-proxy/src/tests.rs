@@ -74,6 +74,7 @@ fn start(
         bind,
         core,
         Config {
+            udp_enabled: false,
             kind,
             host: "exit.test".into(),
             port,
@@ -302,7 +303,7 @@ fn aether_connection_failure_has_no_direct_fallback() {
 }
 
 #[test]
-fn udp_and_bind_are_rejected_without_contacting_aether() {
+fn disabled_udp_and_bind_are_rejected_without_contacting_aether() {
     let core = listener();
     core.set_nonblocking(true).unwrap();
     let (server, addr) = start(core.local_addr().unwrap(), Kind::Socks5, 1080, None);
@@ -355,6 +356,7 @@ fn validation_rejects_url_injection_and_missing_credentials() {
         "",
     ] {
         assert!(Config {
+            udp_enabled: false,
             kind: Kind::Http,
             host: host.into(),
             port: 8080,
@@ -364,6 +366,7 @@ fn validation_rejects_url_injection_and_missing_credentials() {
         .is_err());
     }
     assert!(Config {
+        udp_enabled: false,
         kind: Kind::Socks5,
         host: "exit.test".into(),
         port: 1080,

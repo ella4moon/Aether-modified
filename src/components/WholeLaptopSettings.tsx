@@ -12,6 +12,7 @@ interface Support {
 export function WholeLaptopSettings() {
   const enabled = useConnectionStore((s) => s.profile.whole_laptop);
   const finalProxy = useConnectionStore((s) => s.profile.final_proxy.enabled);
+  const udpEnabled = useConnectionStore((s) => s.profile.final_proxy.udp_enabled);
   const status = useConnectionStore((s) => s.status);
   const setEnabled = useConnectionStore((s) => s.setWholeLaptop);
   const [support, setSupport] = useState<Support | null>(null);
@@ -54,8 +55,10 @@ export function WholeLaptopSettings() {
       </div>
       <p className="text-xs leading-5 text-muted-foreground">
         Apps use your proxy without individual proxy settings or browser extensions.
-        Carries internet TCP and DNS. Other UDP and ping are blocked; some games
-        and voice calls may not work.
+        {udpEnabled
+          ? " Carries internet TCP, UDP and DNS through your final proxy."
+          : " Carries internet TCP and DNS. Enable UDP in Final proxy above for games, voice traffic and other UDP apps."}
+        {" Ping (ICMP) is not supported by SOCKS5."}
       </p>
       {support && !support.supported ? (
         <p className="text-xs text-muted-foreground">Available on Windows only.</p>

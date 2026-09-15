@@ -1,5 +1,44 @@
 # Verification of the final-proxy changes
 
+## Native UDP and whole-laptop UDP, version 0.9.0 (2026-09-15)
+
+| Local check | Result |
+| --- | --- |
+| TypeScript/Vite production build and ESLint | Passed |
+| Linux desktop backend tests | 23 passed, including upgrade defaults and saving the UDP preference |
+| Final-proxy relay tests | 21 passed, including nine UDP tests |
+| Whole-laptop policy tests | 5 passed, covering both TCP-only and TCP/UDP configurations |
+| Windows x64 relay library and tests, Clippy with warnings denied | Passed using the Windows MSVC target |
+| Windows x64 whole-laptop library and tests, Clippy with warnings denied | Passed using the Windows MSVC target |
+| Both generated configurations checked by pinned sing-box 1.14.1 on Linux | Passed; no adapter started |
+| Git whitespace check | Passed |
+
+The UDP integration tests use actual loopback UDP sockets for separate mock
+Aether and final-proxy hops. They check nested SOCKS5 envelopes, authentication,
+domain-form relay/destination addresses, empty and larger datagrams, source-port
+pinning, malformed/fragmented packet rejection, association refusal, and socket
+cleanup when the client disconnects, either upstream control connection closes,
+or the server stops. A separate test checks cancellation during an incomplete
+UDP handshake. HTTP CONNECT cannot be configured as UDP-capable.
+
+UDP payloads stay in UDP datagrams. The TCP connections carry SOCKS5
+authentication and association control only. The relay's outbound UDP socket
+accepts only the verified Aether loopback peer; neither the final proxy nor the
+destination is dialled directly by the GUI. Aether's existing WireGuard transport
+and UDP implementation are unchanged.
+
+The startup probe verifies TCP CONNECT and both UDP ASSOCIATE handshakes. It
+does **not** establish that a provider permits every UDP destination or demonstrate
+a live UDP exit IP. These local checks do not use a real Aether tunnel, the user's
+private proxy, or a Windows 11 TUN adapter. Native Windows runtime testing of
+installation, adapter creation, forwarding, disconnect and recovery remains
+necessary. See [WHOLE-LAPTOP.md](WHOLE-LAPTOP.md).
+
+The build workflow now starts on `main` pushes. It runs the relay and helper
+tests on native runners and checks both generated configurations with the
+bundled Windows sing-box before building installers. The older results below
+describe earlier versions; version 0.9.0 enables UDP when **Forward UDP** is on.
+
 ## Windows whole-laptop option, version 0.8.0 (2026-09-15)
 
 | Local check | Result |

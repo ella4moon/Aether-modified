@@ -1,6 +1,6 @@
 # Whole laptop on Windows 11
 
-Version 0.8.0 adds **Advanced → Whole laptop (Windows)**. Ordinary Windows apps
+Version 0.9.0 adds UDP to **Advanced → Whole laptop (Windows)**. Ordinary Windows apps
 can use your final proxy without application proxy settings or a browser
 extension. This works with the WireGuard protocol you already use in Aether.
 
@@ -8,24 +8,28 @@ extension. This works with the WireGuard protocol you already use in Aether.
 
 ## Setup
 
-1. Build a fresh installer from `main` using [Run workflow](https://github.com/ella4moon/Aether-modified/actions/workflows/build.yml).
-   Extract `bundles-windows-x86_64`, then install the **0.8.0** setup executable
-   or MSI. Old installers do not include the virtual adapter component.
+1. Open the latest successful [build](https://github.com/ella4moon/Aether-modified/actions/workflows/build.yml)
+   on `main` (builds now start automatically on updates; **Run workflow** is also
+   available). Extract `bundles-windows-x86_64`, then install the **0.9.0** setup
+   executable or MSI. Version 0.8.0 does not forward UDP.
 2. Quit the running Aether-GUI from its tray menu. Right-click the newly installed
    app and choose **Run as administrator**. Windows requires elevation to create
    the adapter and routes. No permanent service or startup task is installed.
 3. In **Advanced**, keep your working **WireGuard** and **Final proxy** settings.
    Re-enter proxy credentials if needed; they stay in memory. Keep **SOCKS5 Proxy**
    on a loopback address such as `127.0.0.1:1819`, with LAN sharing disabled.
-4. Enable **Whole laptop (Windows) → Route apps through my final proxy**. Connect
+4. Choose a **SOCKS5** endpoint that supports **UDP ASSOCIATE**, and enable
+   **Final proxy → Forward UDP**. This setting also enables UDP for applications
+   using the local SOCKS5 listener directly. HTTP CONNECT does not carry UDP.
+5. Enable **Whole laptop (Windows) → Route apps through my final proxy**. Connect
    and wait for **Whole laptop via final proxy**. Aether and the final proxy are
    checked before Windows traffic capture starts.
-5. Turn off FoxyProxy and other application proxy overrides for a clean test.
+6. Turn off FoxyProxy and other application proxy overrides for a clean test.
    Stop other VPN/TUN apps and restart applications with existing connections.
    No Windows manual proxy setting is needed.
 
-In PowerShell, check the public IPv4 address using a new connection without a
-per-app proxy:
+In PowerShell, check the public IPv4 address using a new **TCP** connection
+without a per-app proxy (this HTTPS check does not verify UDP):
 
 ```powershell
 curl.exe -4 --noproxy "*" https://api.ipify.org
@@ -42,17 +46,23 @@ if you want your Aether final proxy to be what the destination sees.
 | --- | --- |
 | Internet TCP, including ordinary HTTPS | Through Aether and your final proxy |
 | DNS on TCP/UDP port 53 | DNS-over-HTTPS through the same proxy chain |
-| Other internet UDP, including QUIC and many games/voice protocols | Rejected; no direct fallback in the capture policy |
+| Other internet UDP, including QUIC and many games/voice protocols | Through Aether and your SOCKS5 final proxy when Forward UDP is on; rejected when off |
 | Internet ICMP, including ping | Rejected |
 | IPv4 and IPv6 | Both captured; the proxy must support the destination |
 | Loopback, LAN and Windows link traffic | Remain local according to Windows routes |
 | Aether's own transport | Uses the underlying network to carry the tunnel |
 
-The final-proxy relay supports **TCP CONNECT**, so arbitrary UDP forwarding is
-not available, even with a SOCKS5 final proxy. Browsers usually fall back from
-QUIC to TCP HTTPS; apps that require UDP may not work. DNS-over-HTTPS uses
-Cloudflare's `1.1.1.1` service over your final proxy. The Advanced DNS field still
-configures Aether's internal tunnel DNS.
+UDP uses native SOCKS5 UDP ASSOCIATE at both hops. Your final proxy must allow
+the destination and UDP port, and its advertised UDP relay must be reachable
+through Aether. The connection check verifies association support; acceptance
+alone does not prove delivery to every destination. UDP-dependent apps can
+still have service, NAT or proxy restrictions. SOCKS5 fragmentation and datagrams
+too large for the additional proxy headers are not supported.
+
+DNS-over-HTTPS continues to use Cloudflare's `1.1.1.1` service over your final
+proxy, even with UDP enabled. The Advanced DNS field still configures Aether's
+internal tunnel DNS. HTTP final proxies remain usable with Forward UDP off;
+whole-laptop mode then carries TCP and DNS and rejects other UDP.
 
 This is Windows routing for ordinary internet connections. More specific routes,
 other VPNs, and apps bound to a particular interface can affect which traffic
@@ -100,7 +110,7 @@ when testing the virtual adapter.
 `src-tauri/whole-laptop` owns configuration, elevation checks, process supervision
 and recovery. The helper invokes the GUI executable before Tauri starts. Only
 the exact bundled Aether executable has a direct transport route. Other apps
-are not generally excluded. Both ordinary TCP and the DNS-over-HTTPS server
+are not generally excluded. Ordinary TCP, enabled UDP, and the DNS-over-HTTPS server
 explicitly use the SOCKS outbound pointing to the existing loopback relay.
 
 The workflow checks the generated configuration with the **bundled Windows

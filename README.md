@@ -5,17 +5,18 @@ with an optional **Final proxy** setting, including support for WireGuard connec
 Traffic using the app's local SOCKS5 listener follows this order:
 **your application → Aether/WireGuard → your remote proxy → website**.
 The final proxy supports SOCKS5 or HTTP CONNECT, with optional username/password
-authentication. This mode forwards TCP; a final-proxy failure stops the connection.
+authentication. TCP is supported with either type; **Forward UDP** adds native UDP
+through a SOCKS5 final proxy that supports UDP ASSOCIATE.
 
 See [FINAL-PROXY.md](FINAL-PROXY.md) for setup and build instructions, and
 [VERIFICATION.md](VERIFICATION.md) for test results and remaining validation limits.
 The desktop application retains the upstream Aether-GUI name.
 
-**New in 0.8.0:** [Whole laptop on Windows 11](WHOLE-LAPTOP.md) sends ordinary
-applications' internet TCP and DNS through the same final proxy without
-application proxy settings. Enable it in Advanced while running as administrator.
-Other UDP is blocked; the option is active only while connected and is not a
-kill switch.
+**New in 0.9.0:** UDP forwarding is available in both the local SOCKS5 relay and
+[Whole laptop on Windows 11](WHOLE-LAPTOP.md). Choose a UDP-capable SOCKS5 final
+proxy and enable **Forward UDP** in Advanced. Whole laptop additionally requires
+administrator access and routes ordinary apps' TCP, UDP and DNS through that
+proxy. It is active only while connected and is not a kill switch.
 
 [![Build](https://github.com/ella4moon/Aether-modified/actions/workflows/build.yml/badge.svg)](https://github.com/ella4moon/Aether-modified/actions/workflows/build.yml)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
@@ -53,7 +54,8 @@ This project does not reimplement any of Aether's tunneling logic. It drives the
 
 Build this modified version using [the Windows build script](FINAL-PROXY.md#build-on-windows)
 or the repository's [GitHub Actions build workflow](https://github.com/ella4moon/Aether-modified/actions/workflows/build.yml).
-In Actions, select **Run workflow** on `main`; after a successful run, download
+Updates to `main` now build automatically. In Actions, open the latest successful
+run, or select **Run workflow** on `main`. Download
 `bundles-windows-x86_64` from the run's **Artifacts** section and extract it.
 
 - `Aether-GUI_x.y.z_x64-setup.exe` — standard installer (recommended)

@@ -17,6 +17,8 @@ pub const HELPER_ARG: &str = "--whole-laptop-helper";
 #[serde(deny_unknown_fields)]
 pub struct Request {
     pub local_addr: SocketAddr,
+    #[serde(default)]
+    pub udp_enabled: bool,
     pub engine_path: PathBuf,
     pub sidecar_path: PathBuf,
     pub data_dir: PathBuf,
@@ -96,7 +98,7 @@ fn engine_path_pattern(path: &Path) -> String {
 /// bootstrap resolver. UDP/ICMP never fall back to the physical connection.
 pub fn config(request: &Request) -> Result<Value, String> {
     validate_mode(request.local_addr, true)?;
-    Ok(json!({
+    let mut configuration = json!({
         "log": {"level": "info", "timestamp": false, "disabled": false},
         "dns": {
             "servers": [{
@@ -125,11 +127,20 @@ pub fn config(request: &Request) -> Result<Value, String> {
                 {"process_path_regex": [engine_path_pattern(&request.engine_path)],
                  "action": "route", "outbound": "aether-transport"},
                 {"port": 53, "action": "hijack-dns"},
-                {"network": ["udp", "icmp"], "action": "reject"}
+                {"network": if request.udp_enabled { json!(["icmp"]) } else { json!(["udp", "icmp"]) }, "action": "reject"}
             ],
             "final": "local-final-proxy"
         }
-    }))
+    });
+    if request.udp_enabled {
+        // Omitting network enables native SOCKS5 TCP and UDP; udp_over_tcp
+        // remains disabled. The local relay performs both proxy UDP hops.
+        configuration["outbounds"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("network");
+    }
+    Ok(configuration)
 }
 
 #[cfg(windows)]
@@ -169,6 +180,7 @@ mod tests {
     fn request() -> Request {
         Request {
             local_addr: "127.0.0.1:1819".parse().unwrap(),
+            udp_enabled: false,
             engine_path: r"C:\Program Files\Aether (test)\binaries\aether.exe".into(),
             sidecar_path: r"C:\Program Files\Aether (test)\binaries\sing-box.exe".into(),
             data_dir: r"C:\Users\test\AppData\Roaming\com.cluvexstudio.aethergui".into(),
@@ -222,6 +234,18 @@ mod tests {
         assert!(addresses.iter().any(|a| a.as_str().unwrap().contains(':')));
         assert!(addresses.iter().any(|a| a.as_str().unwrap().contains('.')));
         assert_eq!(c["route"]["auto_detect_interface"], true);
+    }
+
+    #[test]
+    fn udp_mode_uses_the_same_proxy_for_datagrams_and_keeps_icmp_rejected() {
+        let mut r = request();
+        r.udp_enabled = true;
+        let c = config(&r).unwrap();
+        assert!(c["outbounds"][0].get("network").is_none());
+        assert!(c["outbounds"][0].get("udp_over_tcp").is_none());
+        assert_eq!(c["route"]["final"], c["outbounds"][0]["tag"]);
+        assert_eq!(c["dns"]["servers"][0]["detour"], c["outbounds"][0]["tag"]);
+        assert_eq!(c["route"]["rules"][2]["network"], json!(["icmp"]));
     }
 
     #[test]

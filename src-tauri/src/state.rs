@@ -28,6 +28,7 @@ pub enum ConnectionState {
         socks_addr: String,
         connected_at_ms: u64,
         whole_laptop: bool,
+        udp_enabled: bool,
     },
     Reconnecting {
         attempt: u32,

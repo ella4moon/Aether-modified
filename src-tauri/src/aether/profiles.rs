@@ -16,6 +16,7 @@ pub struct FinalProxyProfile {
     pub host: String,
     pub port: String,
     pub authenticate: bool,
+    pub udp_enabled: bool,
     pub username: String,
     pub password: String,
 }
@@ -28,6 +29,7 @@ impl std::fmt::Debug for FinalProxyProfile {
             .field("host", &self.host)
             .field("port", &self.port)
             .field("authenticate", &self.authenticate)
+            .field("udp_enabled", &self.udp_enabled)
             .finish_non_exhaustive()
     }
 }
@@ -40,6 +42,7 @@ impl Default for FinalProxyProfile {
             host: String::new(),
             port: "1080".into(),
             authenticate: false,
+            udp_enabled: false,
             username: String::new(),
             password: String::new(),
         }
@@ -58,6 +61,7 @@ impl FinalProxyProfile {
             .parse::<u16>()
             .map_err(|_| AetherError::FinalProxy("Enter a port between 1 and 65535".into()))?;
         let config = Config {
+            udp_enabled: self.udp_enabled,
             kind: match self.kind {
                 FinalProxyKind::Socks5 => Kind::Socks5,
                 FinalProxyKind::Http => Kind::Http,
@@ -517,6 +521,10 @@ mod tests {
         assert_eq!(p.bind_address, "127.0.0.1:1819");
         assert_eq!(p.masque_noize, MasqueNoize::Firewall);
         assert!(!p.whole_laptop, "upgrading must not enable Windows capture");
+        assert!(
+            !p.final_proxy.udp_enabled,
+            "upgrading must not require UDP from a previously working proxy"
+        );
     }
 
     #[test]
@@ -528,6 +536,19 @@ mod tests {
             .position(|a| a == "--noize")
             .expect("missing --noize");
         assert_eq!(args.get(i + 1).map(String::as_str), Some("firewall"));
+    }
+
+    #[test]
+    fn udp_preference_controls_the_relay_and_is_preserved_in_the_profile() {
+        let mut p = ConnectionProfile::default();
+        p.final_proxy = FinalProxyProfile {
+            enabled: true,
+            host: "exit.test".into(),
+            udp_enabled: true,
+            ..FinalProxyProfile::default()
+        };
+        assert!(p.final_proxy.config().unwrap().unwrap().udp_enabled);
+        assert!(p.without_secrets().final_proxy.udp_enabled);
     }
 
     #[test]

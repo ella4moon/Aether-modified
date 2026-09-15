@@ -1,6 +1,8 @@
-//! A local SOCKS5 CONNECT listener with exactly two proxy hops:
+//! A local SOCKS5 CONNECT/UDP ASSOCIATE listener with exactly two proxy hops:
 //! Aether's loopback SOCKS5 listener, then the configured final proxy.
 //! No destination or final-proxy address is resolved or dialled locally.
+
+mod udp;
 
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
@@ -38,11 +40,15 @@ pub struct Config {
     pub host: String,
     pub port: u16,
     pub credentials: Option<Credentials>,
+    pub udp_enabled: bool,
 }
 
 impl Config {
     pub fn validate(&self) -> io::Result<()> {
         Target::new(&self.host, self.port)?;
+        if self.udp_enabled && self.kind != Kind::Socks5 {
+            return Err(invalid("UDP requires a SOCKS5 final proxy with UDP ASSOCIATE support. HTTP CONNECT carries TCP only."));
+        }
         if let Some(auth) = &self.credentials {
             if auth.username.is_empty() || auth.password.is_empty() {
                 return Err(invalid("Enter both the final proxy username and password"));
@@ -176,7 +182,12 @@ fn socks_login(stream: &mut TcpStream, credentials: Option<&Credentials>) -> io:
 }
 
 fn socks_connect(stream: &mut TcpStream, target: &Target) -> io::Result<()> {
-    let mut packet = vec![5, 1, 0];
+    socks_request(stream, 1, target)?;
+    Ok(())
+}
+
+fn socks_request(stream: &mut TcpStream, command: u8, target: &Target) -> io::Result<Target> {
+    let mut packet = vec![5, command, 0];
     packet.extend(target.encode());
     stream.write_all(&packet)?;
     let response = read_array::<4>(stream)?;
@@ -186,12 +197,19 @@ fn socks_connect(stream: &mut TcpStream, target: &Target) -> io::Result<()> {
     if response[1] != 0 {
         return Err(io::Error::new(
             io::ErrorKind::ConnectionRefused,
-            format!("The proxy refused CONNECT (SOCKS code {})", response[1]),
+            format!(
+                "The proxy refused {} (SOCKS code {})",
+                if command == 3 {
+                    "UDP ASSOCIATE"
+                } else {
+                    "CONNECT"
+                },
+                response[1]
+            ),
         ));
     }
     // Consume only the response; any coalesced application bytes stay in TCP.
-    read_target(stream, response[3])?;
-    Ok(())
+    read_target(stream, response[3])
 }
 
 fn base64(bytes: &[u8]) -> String {
@@ -332,19 +350,33 @@ impl Shared {
         })
     }
 
-    fn connect(self: &Arc<Self>, target: &Target) -> io::Result<Tracked> {
+    fn connect_core(self: &Arc<Self>) -> io::Result<Tracked> {
         if self.stopped.load(Ordering::Acquire) {
             return Err(io::Error::new(io::ErrorKind::Interrupted, "Proxy stopped"));
         }
-        // This is deliberately the ONLY outbound socket dial in this crate.
+        // The only TCP dial is to Aether. UDP similarly uses only Aether's
+        // verified loopback UDP relay, never a final proxy or destination.
         let stream = TcpStream::connect_timeout(&self.core, Duration::from_secs(2))?;
         stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
         stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT))?;
         stream.set_nodelay(true)?;
         let mut tracked = self.track(stream)?;
+        socks_login(&mut tracked.stream, None)?;
+        Ok(tracked)
+    }
+
+    fn connect_final(self: &Arc<Self>) -> io::Result<Tracked> {
+        let mut tracked = self.connect_core()?;
+        socks_connect(
+            &mut tracked.stream,
+            &Target::new(&self.config.host, self.config.port)?,
+        )?;
+        Ok(tracked)
+    }
+
+    fn connect(self: &Arc<Self>, target: &Target) -> io::Result<Tracked> {
+        let mut tracked = self.connect_final()?;
         let stream = &mut tracked.stream;
-        socks_login(stream, None)?;
-        socks_connect(stream, &Target::new(&self.config.host, self.config.port)?)?;
         match self.config.kind {
             Kind::Socks5 => {
                 socks_login(stream, self.config.credentials.as_ref())?;
@@ -385,6 +417,11 @@ impl Probe {
     /// application data. Authentication and both CONNECT hops must succeed.
     pub fn verify(&self) -> io::Result<()> {
         self.0.connect(&Target::new("example.com", 443)?)?;
+        if self.0.config.udp_enabled {
+            // Verify both proxies accept UDP associations. This checks the
+            // capability/control path, not reachability of every UDP service.
+            udp::Association::open(&self.0)?;
+        }
         Ok(())
     }
 }
@@ -507,10 +544,14 @@ fn handle_client(mut client: Tracked, shared: &Arc<Shared>) -> io::Result<()> {
         reply(&mut client.stream, 1)?;
         return Err(invalid("Malformed SOCKS5 request"));
     }
+    if request[1] == 3 && shared.config.udp_enabled {
+        let requested = read_target(&mut client.stream, request[3])?;
+        return udp::handle(client, shared, requested);
+    }
     if request[1] != 1 {
         reply(&mut client.stream, 7)?;
         return Err(invalid(
-            "Final proxy mode supports TCP CONNECT only; UDP and BIND are disabled",
+            "Enable UDP with a SOCKS5 final proxy to use UDP ASSOCIATE. SOCKS BIND is not supported.",
         ));
     }
     let target = match read_target(&mut client.stream, request[3])

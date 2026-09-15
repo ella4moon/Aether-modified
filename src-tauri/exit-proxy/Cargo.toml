@@ -6,3 +6,4 @@ license = "AGPL-3.0-only"
 description = "A final SOCKS5 or HTTP CONNECT proxy reached through Aether"
 
 [dependencies]
+mio = { version = "1.2.3", features = ["net", "os-poll"] }

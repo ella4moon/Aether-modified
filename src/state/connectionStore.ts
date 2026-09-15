@@ -54,7 +54,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   status: { state: "Idle" },
   profile: {
     whole_laptop: false,
-    final_proxy: { enabled: false, kind: "socks5", host: "", port: "1080", authenticate: false, username: "", password: "" },
+    final_proxy: { enabled: false, kind: "socks5", host: "", port: "1080", authenticate: false, udp_enabled: false, username: "", password: "" },
     protocol: "auto",
     scan_mode: "balanced",
     ip_version: "v4",
@@ -177,7 +177,8 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   setFinalProxy: (patch) =>
     set((s) => ({ profile: { ...s.profile,
       whole_laptop: patch.enabled === false ? false : s.profile.whole_laptop,
-      final_proxy: { ...s.profile.final_proxy, ...patch } } })),
+      final_proxy: { ...s.profile.final_proxy, ...patch,
+        udp_enabled: patch.kind === "http" ? false : patch.udp_enabled ?? s.profile.final_proxy.udp_enabled } } })),
 
   setWholeLaptop: (whole_laptop) =>
     set((s) => ({ profile: { ...s.profile, whole_laptop } })),

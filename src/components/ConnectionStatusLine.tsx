@@ -168,7 +168,9 @@ export function ConnectionStatusLine() {
       </AnimatePresence>
       {status.state === "Connected" && (
         <span className="font-mono text-xs text-muted-foreground">
-          {status.whole_laptop ? "TCP + DNS · Other UDP blocked" : `SOCKS5 ${status.socks_addr}`}
+          {status.whole_laptop
+            ? status.udp_enabled ? "TCP + UDP + DNS" : "TCP + DNS · UDP forwarding off"
+            : `SOCKS5 ${status.socks_addr}${status.udp_enabled ? " · TCP + UDP" : ""}`}
         </span>
       )}
       {status.state === "Connecting" && <ScanProgressBar percent={scanPercent} />}
