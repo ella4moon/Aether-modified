@@ -118,6 +118,59 @@ fn assert_exchange(mut client: TcpStream) {
 }
 
 #[test]
+fn accepted_nonblocking_socket_waits_for_fragmented_handshake() {
+    let exit = listener();
+    let exit_addr = exit.local_addr().unwrap();
+    let fake_exit = thread::spawn(move || {
+        let (mut stream, _) = exit.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        expected(&mut stream, &[5, 1, 0]);
+        stream.write_all(&[5, 0]).unwrap();
+        expected(&mut stream, &connect_packet("website.test", 443));
+        exchange(stream);
+    });
+    let (core, fake_core) = outer(exit_addr);
+    let (server, _) = start(core, Kind::Socks5, exit_addr.port(), None);
+
+    let bind = listener();
+    let mut client = socket(bind.local_addr().unwrap());
+    let (accepted, _) = bind.accept().unwrap();
+    // Emulate platforms that inherit the listener's nonblocking mode.
+    accepted.set_nonblocking(true).unwrap();
+    let tracked = server.shared.track(accepted).unwrap();
+    let shared = server.shared.clone();
+    let (done_tx, done_rx) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        let _ = done_tx.send(handle_client(tracked, &shared));
+    });
+
+    // The handler must wait for a client, then for the rest of a partial greeting.
+    for fragment in [&[][..], &[5][..]] {
+        client.write_all(fragment).unwrap();
+        assert!(matches!(
+            done_rx.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+    }
+    client.write_all(&[1, 0]).unwrap();
+    expected(&mut client, &[5, 0]);
+    client
+        .write_all(&connect_packet("website.test", 443))
+        .unwrap();
+    assert_exchange(client);
+    done_rx
+        .recv_timeout(Duration::from_secs(3))
+        .unwrap()
+        .unwrap();
+    worker.join().unwrap();
+    fake_exit.join().unwrap();
+    fake_core.join().unwrap();
+    drop(server);
+}
+
+#[test]
 fn socks5_chain_preserves_order_domains_authentication_and_half_close() {
     for authenticated in [false, true] {
         let exit = listener();

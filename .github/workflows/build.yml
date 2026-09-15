@@ -76,12 +76,19 @@ jobs:
 
       - run: npm ci
 
-      - name: Check frontend and final-proxy behavior
-        run: |
-          npm run build
-          npm run lint
-          cargo test --manifest-path src-tauri/exit-proxy/Cargo.toml
-          cargo test --manifest-path src-tauri/Cargo.toml
+      # Separate native commands so PowerShell cannot mask an earlier failure
+      # with the exit code of a later successful command.
+      - name: Build frontend
+        run: npm run build
+
+      - name: Lint frontend
+        run: npm run lint
+
+      - name: Test final-proxy relay
+        run: cargo test --locked --manifest-path src-tauri/exit-proxy/Cargo.toml
+
+      - name: Test desktop backend
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
       - uses: tauri-apps/tauri-action@v0
         env:

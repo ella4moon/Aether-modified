@@ -485,6 +485,9 @@ fn reply(stream: &mut TcpStream, code: u8) -> io::Result<()> {
 }
 
 fn handle_client(mut client: Tracked, shared: &Arc<Shared>) -> io::Result<()> {
+    // macOS and Windows can inherit nonblocking mode from the listener.
+    // Each client has a dedicated worker using blocking reads and writes.
+    client.stream.set_nonblocking(false)?;
     client.stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
     client.stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT))?;
     client.stream.set_nodelay(true)?;
