@@ -39,6 +39,17 @@ tests on native runners and checks both generated configurations with the
 bundled Windows sing-box before building installers. The older results below
 describe earlier versions; version 0.9.0 enables UDP when **Forward UDP** is on.
 
+### Native build results and Windows assertion correction (2026-09-16)
+
+The first [0.9.0 native run](https://github.com/ella4moon/Aether-modified/actions/runs/35008019017)
+passed all build and test steps on Linux and both macOS runners. Windows passed
+20 of 21 relay tests, including UDP forwarding, authentication, source validation
+and shutdown. Its rejection test expected EOF but received Winsock
+`ConnectionReset` on a closed upstream association. The assertion now accepts
+either close signal; timeouts, received data and any UDP packets after refusal
+still fail the test. Use a subsequent successful build of this correction for
+the Windows installer.
+
 ## Windows whole-laptop option, version 0.8.0 (2026-09-15)
 
 | Local check | Result |

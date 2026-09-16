@@ -263,7 +263,18 @@ fn failure_of_either_udp_association_fails_without_direct_datagrams() {
         read_target(&mut control, h[3]).unwrap();
         let mut controls = f.controls.recv_timeout(Duration::from_secs(3)).unwrap();
         for c in &mut controls {
-            assert_eq!(c.read(&mut [0u8; 1]).unwrap(), 0);
+            // A refused SOCKS response can leave its unused BND fields unread.
+            // Windows may report the resulting close as a reset rather than EOF.
+            // Both close the association; data or a timeout must still fail.
+            match c.read(&mut [0u8; 1]) {
+                Ok(0) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::ConnectionReset | io::ErrorKind::ConnectionAborted
+                    ) => {}
+                other => panic!("Rejected association did not close: {other:?}"),
+            }
         }
         for socket in [&f.core_udp, &f.final_udp] {
             socket.set_nonblocking(true).unwrap();
