@@ -24,6 +24,7 @@ use windows_sys::Win32::System::JobObjects::{
 };
 use windows_sys::Win32::System::Threading::{
     CreateMutexW, GetCurrentProcess, OpenProcessToken, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW,
+    DETACHED_PROCESS,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
 
@@ -430,7 +431,10 @@ impl Session {
         preflight(&request)?;
         let mut child = Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
             .arg(HELPER_ARG)
-            .creation_flags(CREATE_NO_WINDOW)
+            // The helper allocates its own console after preserving the pipes.
+            // DETACHED_PROCESS is the documented pairing with AllocConsole,
+            // and also works when this executable uses the console subsystem.
+            .creation_flags(DETACHED_PROCESS)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -591,10 +595,12 @@ mod tests {
                     "--nocapture",
                 ])
                 .env("AETHER_SUPERVISION_TEST", "1")
-                .creation_flags(CREATE_NO_WINDOW)
+                .creation_flags(DETACHED_PROCESS)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
+                // Surface an early child panic in CI instead of only reporting
+                // that the readiness pipe disconnected.
+                .stderr(Stdio::inherit())
                 .spawn()
                 .unwrap(),
         );

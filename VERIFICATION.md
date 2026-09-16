@@ -50,6 +50,15 @@ either close signal; timeouts, received data and any UDP packets after refusal
 still fail the test. Use a subsequent successful build of this correction for
 the Windows installer.
 
+The [next Windows run](https://github.com/ella4moon/Aether-modified/actions/runs/35058247088)
+passed all 21 relay tests and all 23 backend tests. It then exposed an early
+helper exit in both subprocess-supervision tests, before readiness was reported.
+The helper now starts with `DETACHED_PROCESS`, the documented partner for
+[AllocConsole](https://learn.microsoft.com/en-us/windows/console/allocconsole),
+in both production and the test fixture. Child startup errors are visible in CI,
+and helper tests run before the desktop backend build. Route/adapter cleanup
+requirements are unchanged.
+
 ## Windows whole-laptop option, version 0.8.0 (2026-09-15)
 
 | Local check | Result |

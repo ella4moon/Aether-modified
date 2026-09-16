@@ -93,11 +93,11 @@ jobs:
       - name: Test final-proxy relay
         run: cargo test --locked --manifest-path src-tauri/exit-proxy/Cargo.toml
 
-      - name: Test desktop backend
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
-
       - name: Test whole-laptop routing policy
         run: cargo test --locked --manifest-path src-tauri/whole-laptop/Cargo.toml
+
+      - name: Test desktop backend
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
       - name: Validate config with bundled Windows sing-box
         if: runner.os == 'Windows'
