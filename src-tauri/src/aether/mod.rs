@@ -475,15 +475,19 @@ fn activate_whole_laptop(
                 "Aether stopped while starting whole-laptop routing. Try connecting again.".into(),
             );
         }
-        if mgr
-            .whole_laptop
-            .as_mut()
-            .ok_or("Whole-laptop helper is missing")?
-            .poll()?
-        {
+        let session = mgr.whole_laptop.as_mut().ok_or("Whole-laptop helper is missing")?;
+        if poll_whole_laptop(app, session)? {
             return Ok(true);
         }
     }
+}
+
+fn poll_whole_laptop(app: &AppHandle, session: &mut aether_whole_laptop::Session) -> Result<bool, String> {
+    let result = session.poll();
+    for line in session.take_logs() {
+        let _ = app.emit(LOG_EVENT, LogEvent { line, timestamp: now_millis() });
+    }
+    result
 }
 
 fn monitor_connected(app: AppHandle, manager: Arc<Mutex<AetherManager>>, attempt: Attempt) {
@@ -493,7 +497,7 @@ fn monitor_connected(app: AppHandle, manager: Arc<Mutex<AetherManager>>, attempt
         if !mgr.is_current(attempt.generation) {
             return;
         }
-        if let Some(error) = mgr.whole_laptop.as_mut().and_then(|s| s.poll().err()) {
+        if let Some(error) = mgr.whole_laptop.as_mut().and_then(|s| poll_whole_laptop(&app, s).err()) {
             drop(mgr);
             finish_error(&app, &manager, &attempt, error, "whole_laptop");
             return;

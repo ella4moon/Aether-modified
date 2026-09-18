@@ -17,7 +17,7 @@ dependencies = [
 
 [[package]]
 name = "aether-gui"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "aether-exit-proxy",
  "aether-whole-laptop",

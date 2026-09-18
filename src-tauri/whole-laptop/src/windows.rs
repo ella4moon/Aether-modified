@@ -31,6 +31,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
 const JOURNAL: &str = "whole-laptop-owner.json";
 const CONFIG: &str = "whole-laptop.json";
 const START_TIMEOUT: Duration = Duration::from_secs(20);
+const VERIFY_ROUTES: &str = include_str!("verify-routes.ps1");
 
 // Get-NetAdapter -Name emits an error when the adapter does not exist yet.
 // SilentlyContinue hides that error but powershell.exe -Command still exits 1.
@@ -361,9 +362,21 @@ fn serve(request: Request, stop: mpsc::Receiver<()>) -> Result<(), String> {
             tail: Arc<Mutex<VecDeque<String>>>,
         ) {
             std::thread::spawn(move || {
+                let mut forwarded = 0;
+                let mut last_problem = Instant::now();
                 for line in BufReader::new(reader).lines().map_while(Result::ok) {
                     if line.contains("sing-box started") {
                         ready.store(true, Ordering::Release);
+                    }
+                    // Include startup/initial traffic in the GUI log, then
+                    // rate-limit problems so busy traffic cannot flood IPC.
+                    let problem = line.contains("WARN") || line.contains("ERROR") || line.contains("FATAL");
+                    if forwarded < 24 || (problem && last_problem.elapsed() >= Duration::from_secs(1)) {
+                        emit(Event::Log(format!("[Whole laptop] {}", line.chars().take(600).collect::<String>())));
+                        forwarded += 1;
+                        if problem {
+                            last_problem = Instant::now();
+                        }
                     }
                     let mut tail = tail.lock().unwrap();
                     if tail.len() == 6 {
@@ -396,6 +409,11 @@ fn serve(request: Request, stop: mpsc::Receiver<()>) -> Result<(), String> {
                 Ok(None) => {}
             }
             if !announced && ready.load(Ordering::Acquire) {
+                emit(Event::Log("[Whole laptop] Checking Windows route selection…".into()));
+                match powershell("route verification", VERIFY_ROUTES) {
+                    Ok(details) => emit(Event::Log(format!("[Whole laptop] {}", details.trim()))),
+                    Err(error) => break Err(error),
+                }
                 emit(Event::Ready);
                 announced = true;
             }
@@ -452,6 +470,7 @@ pub struct Session {
     ready: bool,
     deadline: Instant,
     stopped: bool,
+    logs: VecDeque<String>,
 }
 
 impl Session {
@@ -485,6 +504,7 @@ impl Session {
             ready: false,
             deadline: Instant::now() + Duration::from_secs(55),
             stopped: false,
+            logs: VecDeque::new(),
         };
         let input = session.input.as_mut().unwrap();
         serde_json::to_writer(&mut *input, &request).map_err(|e| e.to_string())?;
@@ -493,18 +513,37 @@ impl Session {
         Ok(session)
     }
 
-    /// True only after sing-box reports that its adapter and routing started.
+    /// True only after startup and Windows' actual route selection are checked.
     pub fn poll(&mut self) -> Result<bool, String> {
         for event in self.events.try_iter() {
             match event {
                 Event::Ready => self.ready = true,
                 Event::Failed(error) => return Err(error),
+                Event::Log(line) => {
+                    if self.logs.len() == 100 {
+                        self.logs.pop_front();
+                    }
+                    self.logs.push_back(line);
+                }
             }
         }
         if let Some(status) = self.child.try_wait().map_err(|e| e.to_string())? {
             // The reader may enqueue its last error concurrently with try_wait.
-            if let Ok(Event::Failed(error)) = self.events.recv_timeout(Duration::from_millis(100)) {
-                return Err(error);
+            let until = Instant::now() + Duration::from_millis(100);
+            while let Ok(event) = self.events.recv_timeout(until.saturating_duration_since(Instant::now())) {
+                match event {
+                    Event::Failed(error) => return Err(error),
+                    Event::Log(line) => {
+                        if self.logs.len() == 100 {
+                            self.logs.pop_front();
+                        }
+                        self.logs.push_back(line);
+                    }
+                    Event::Ready => self.ready = true,
+                }
+                if Instant::now() >= until {
+                    break;
+                }
             }
             return Err(format!(
                 "Whole-laptop helper stopped ({status}). Use Restore normal networking if needed."
@@ -517,6 +556,10 @@ impl Session {
             );
         }
         Ok(self.ready)
+    }
+
+    pub fn take_logs(&mut self) -> Vec<String> {
+        self.logs.drain(..).collect()
     }
 
     pub fn stop(&mut self) -> Result<(), String> {
@@ -633,6 +676,42 @@ function Get-NetAdapter {
     fn powershell_preserves_localized_error_text() {
         let error = powershell("adapter cleanup", "throw 'Réseau indisponible'").unwrap_err();
         assert!(error.contains("Réseau indisponible"), "{error}");
+    }
+
+    #[test]
+    fn route_verification_requires_capture_routes_and_selected_interface() {
+        // Script-level regression: validate the real readiness script without
+        // creating routes. Find-NetRoute returns two different object types.
+        let fixture = r#"
+function Get-NetAdapter {
+    [CmdletBinding()] param([switch]$IncludeHidden)
+    [pscustomobject]@{Name = 'AetherWholeLaptop'; Status = 'Up'; ifIndex = 27}
+}
+function Get-NetRoute {
+    [CmdletBinding()] param([int]$InterfaceIndex, [string]$PolicyStore)
+    foreach ($prefix in @('0.0.0.0/1', '128.0.0.0/1', '::/1', '8000::/1')) {
+        if ($missing -and $prefix -eq '128.0.0.0/1') { continue }
+        [pscustomobject]@{DestinationPrefix = $prefix; InterfaceIndex = 27}
+    }
+}
+function Find-NetRoute {
+    [CmdletBinding()] param([string]$RemoteIPAddress)
+    [pscustomobject]@{IPAddress = '172.31.255.1'; InterfaceIndex = 27}
+    if ($wrong) {
+        [pscustomobject]@{DestinationPrefix = '0.0.0.0/0'; InterfaceIndex = 9; InterfaceAlias = 'Other VPN'}
+    } else {
+        [pscustomobject]@{DestinationPrefix = '0.0.0.0/1'; InterfaceIndex = 27; InterfaceAlias = 'AetherWholeLaptop'}
+    }
+}
+"#;
+        let verify = |flags: &str| {
+            powershell("route verification", &format!("{flags}\n{fixture}\n{VERIFY_ROUTES}"))
+        };
+        assert!(verify("$wrong = $false; $missing = $false").unwrap().contains("Windows selected AetherWholeLaptop"));
+        let conflict = verify("$wrong = $true; $missing = $false").unwrap_err();
+        assert!(conflict.contains("Windows selected 'Other VPN'"), "{conflict}");
+        let missing = verify("$wrong = $false; $missing = $true").unwrap_err();
+        assert!(missing.contains("missing its 128.0.0.0/1 capture route"), "{missing}");
     }
 
     struct ChildGuard(Child);

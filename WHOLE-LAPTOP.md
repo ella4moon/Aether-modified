@@ -10,10 +10,10 @@ extension. This works with the WireGuard protocol you already use in Aether.
 
 1. Open the latest successful [build](https://github.com/ella4moon/Aether-modified/actions/workflows/build.yml)
    on `main` (builds now start automatically on updates; **Run workflow** is also
-   available). Extract `bundles-windows-x86_64`, then install the **0.9.1** setup
-   executable or MSI. Version 0.9.1 fixes the first-connection adapter check that
-   could fail with a blank “Windows network recovery failed” message in 0.9.0.
-   Version 0.8.0 does not forward UDP.
+   available). Extract `bundles-windows-x86_64`, then install the **0.9.2** setup
+   executable or MSI. Version 0.9.2 adds explicit capture routes and checks the
+   routes Windows selects before showing connected. Version 0.9.1 fixed the
+   first-connection adapter check; version 0.8.0 does not forward UDP.
 2. Quit the running Aether-GUI from its tray menu. Right-click the newly installed
    app and choose **Run as administrator**. Windows requires elevation to create
    the adapter and routes. No permanent service or startup task is installed.
@@ -25,7 +25,10 @@ extension. This works with the WireGuard protocol you already use in Aether.
    using the local SOCKS5 listener directly. HTTP CONNECT does not carry UDP.
 5. Enable **Whole laptop (Windows) → Route apps through my final proxy**. Connect
    and wait for **Whole laptop via final proxy**. Aether and the final proxy are
-   checked before Windows traffic capture starts.
+   checked before Windows traffic capture starts. The helper then checks that
+   all four IPv4/IPv6 capture routes exist and that Windows selects the virtual
+   adapter for representative internet destinations. A conflicting selected
+   interface produces an error instead of a green connected status.
 6. Turn off FoxyProxy and other application proxy overrides for a clean test.
    Stop other VPN/TUN apps and restart applications with existing connections.
    No Windows manual proxy setting is needed.
@@ -97,6 +100,12 @@ The app data directory holds local adapter configuration and a recovery record.
 These contain no remote proxy credentials. A disabled adapter left after a
 forced stop is reused only if this app still has its ownership record.
 
+The GUI log includes `[Whole laptop]` startup information, initial tunnel
+traffic and rate-limited warnings/errors. Include those lines when reporting a
+routing failure. A route check verifies Windows' routing decision at startup;
+it cannot prove delivery to every website, and later route changes or software
+that binds a different interface can still affect traffic.
+
 ## Build and implementation
 
 The Windows workflow and `build-windows.ps1` download the unmodified, checksum
@@ -116,5 +125,8 @@ are not generally excluded. Ordinary TCP, enabled UDP, and the DNS-over-HTTPS se
 explicitly use the SOCKS outbound pointing to the existing loopback relay.
 
 The workflow checks the generated configuration with the **bundled Windows
-executable** before producing installers. See [VERIFICATION.md](VERIFICATION.md)
+executable** before producing installers. It also sends real TCP and UDP
+through a temporary Windows TUN adapter into a loopback SOCKS5 test server.
+That test uses one benchmark-address route and leaves the runner's default
+internet route and DNS configuration alone. See [VERIFICATION.md](VERIFICATION.md)
 for local test results and outstanding Windows runtime checks.

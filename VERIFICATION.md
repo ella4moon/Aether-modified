@@ -1,5 +1,36 @@
 # Verification of the final-proxy changes
 
+## Windows capture and readiness, version 0.9.2 (2026-09-18)
+
+A report showed a green whole-laptop status while a fresh-looking curl result
+did not match the configured final proxy address. The supplied log contained
+only Aether-core output, so it did not establish the laptop's selected routes
+or the proxy's actual exit address. Earlier readiness checks only observed
+`sing-box started` and could not detect Windows choosing another interface.
+
+Version 0.9.2 configures `0.0.0.0/1`, `128.0.0.0/1`, `::/1`, and `8000::/1`
+on the owned TUN adapter, giving these routes precedence over competing default
+routes without changing the user's other interfaces. Before announcing ready,
+the helper checks the adapter, the four routes, and Windows' actual selections
+for representative IPv4/IPv6 destinations. Missing routes or a conflicting
+selected interface abort startup with a diagnostic. Startup/initial traffic
+and rate-limited problems from sing-box are now included in the GUI log.
+
+The Windows test suite checks successful route verification, a competing
+selected interface, and a missing capture route. A separate CI integration
+gate runs the bundled sing-box against a loopback SOCKS5 mock using a real
+Windows TUN adapter. Ordinary TCP and UDP sockets send unique payloads to a
+benchmark address; the test requires the mock SOCKS outbound to observe and
+echo both payloads. It uses one /32 route and disables native DNS/WFP changes
+for the test adapter, preserving the runner's default connectivity. The TUN
+stack, SOCKS outbound and automatic outbound-interface binding are exercised.
+
+This packet test does not establish behavior on the user's Windows 11 laptop,
+verify the user's private proxy, or test native DNS hijacking. The startup
+route checks are point-in-time checks, not a kill switch or proof that every
+destination is reachable. The Windows build must pass this new gate before an
+installer is produced.
+
 ## Windows adapter discovery, version 0.9.1 (2026-09-18)
 
 The reported blank `Windows network recovery failed:` error can occur before

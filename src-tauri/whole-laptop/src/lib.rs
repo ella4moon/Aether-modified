@@ -113,6 +113,9 @@ pub fn config(request: &Request) -> Result<Value, String> {
             "type": "tun", "tag": "windows-apps", "interface_name": INTERFACE_NAME,
             "address": ["172.31.255.1/30", "fdfe:ae7e:1819::1/126"],
             "mtu": 1500, "auto_route": true, "strict_route": true,
+            // More-specific routes take precedence over an existing /0 even
+            // when another interface has the same or a lower default metric.
+            "route_address": ["0.0.0.0/1", "128.0.0.0/1", "::/1", "8000::/1"],
             "dns_mode": "hijack", "stack": "mixed"
         }],
         "outbounds": [
@@ -148,6 +151,7 @@ pub fn config(request: &Request) -> Result<Value, String> {
 enum Event {
     Ready,
     Failed(String),
+    Log(String),
 }
 
 #[cfg(not(windows))]
@@ -162,6 +166,9 @@ impl Session {
     }
     pub fn stop(&mut self) -> Result<(), String> {
         Ok(())
+    }
+    pub fn take_logs(&mut self) -> Vec<String> {
+        Vec::new()
     }
 }
 #[cfg(not(windows))]
@@ -230,6 +237,10 @@ mod tests {
         let inbound = &c["inbounds"][0];
         assert_eq!(inbound["auto_route"], true);
         assert_eq!(inbound["strict_route"], true);
+        assert_eq!(
+            inbound["route_address"],
+            json!(["0.0.0.0/1", "128.0.0.0/1", "::/1", "8000::/1"])
+        );
         let addresses = inbound["address"].as_array().unwrap();
         assert!(addresses.iter().any(|a| a.as_str().unwrap().contains(':')));
         assert!(addresses.iter().any(|a| a.as_str().unwrap().contains('.')));
