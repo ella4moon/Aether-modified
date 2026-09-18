@@ -111,10 +111,14 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "The bundled whole-laptop configuration is invalid: $mode" }
           }
 
-      - name: Test Windows TUN packet capture (TCP and UDP)
+      - name: Build Windows packet-check helper
+        if: runner.os == 'Windows'
+        run: cargo build --locked --manifest-path src-tauri/whole-laptop/Cargo.toml --example capture-check
+
+      - name: Test Windows TUN packet capture (TCP, UDP and DNS)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: node scripts/test-windows-capture.mjs "$env:RUNNER_TEMP/whole-laptop-check.json" src-tauri/binaries/sing-box.exe
+        run: node scripts/test-windows-capture.mjs "$env:RUNNER_TEMP/whole-laptop-check.json" src-tauri/binaries/sing-box.exe src-tauri/whole-laptop/target/debug/examples/capture-check.exe
 
       - uses: tauri-apps/tauri-action@v0
         env:

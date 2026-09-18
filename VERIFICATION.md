@@ -1,5 +1,43 @@
 # Verification of the final-proxy changes
 
+## Windows returned-packet checks, version 0.9.3 (2026-09-18)
+
+The new laptop log confirms successful route selection and captured DNS, while
+ordinary HTTPS connections time out. It does not establish whether the failed
+TCP connections reached the Windows forwarding listener or whether the proxy
+chain survived capture. The earlier /32 CI test did not use native DNS or
+strict-route filters and did not verify the full chain on the user's laptop.
+
+The bundled sing-tun's [system TCP stack](https://github.com/SagerNet/sing-tun/blob/v0.9.3/stack_system.go)
+creates a Windows TCP listener and ignores errors from its firewall setup.
+Version 0.9.3 uses gVisor for TCP as well as UDP, removing that dependency.
+The precise cause on the laptop remains unconfirmed; a firewall block is a
+possible failure mode, not an observed fact from the supplied logs.
+
+Before reporting connected, the helper now requires:
+
+1. The existing Windows route-selection checks.
+2. A unique TCP payload echoed through the real TUN into a loopback-only probe.
+   A SYN/accept or an installed route alone cannot pass this check.
+3. A successful DNS answer for example.com through the TUN DNS listener. In
+   production this requires DNS-over-HTTPS through Aether and the final proxy
+   after the capture routes are installed. TCP-only mode also supports this.
+
+Failures stop capture and report the failing stage. The local TCP probe uses
+only one IANA benchmark /32 and ephemeral port, with a destination override
+to loopback. It never introduces a general direct Internet route.
+
+The Windows CI gate now runs those exact Rust packet checks as well as ordinary
+TCP and UDP echo traffic. It enables the real TUN's native DNS and strict-route
+filters. The upstream DNS mock uses DNS/TCP through SOCKS, so this does not test
+the user's private proxy or public TLS/DoH service. Only benchmark routes are
+installed; cleanup stops the TUN, disables its unique adapter and clears the
+DNS cache. A readiness check cannot prove every later website is reachable.
+
+Cross-platform tests also cover a returned TCP payload, bounded connection
+failure, the probe's narrow routing scope, and rejecting invalid DNS replies.
+The workflow must pass before producing the 0.9.3 Windows installer.
+
 ## Windows capture and readiness, version 0.9.2 (2026-09-18)
 
 A report showed a green whole-laptop status while a fresh-looking curl result

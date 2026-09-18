@@ -10,9 +10,10 @@ extension. This works with the WireGuard protocol you already use in Aether.
 
 1. Open the latest successful [build](https://github.com/ella4moon/Aether-modified/actions/workflows/build.yml)
    on `main` (builds now start automatically on updates; **Run workflow** is also
-   available). Extract `bundles-windows-x86_64`, then install the **0.9.2** setup
-   executable or MSI. Version 0.9.2 adds explicit capture routes and checks the
-   routes Windows selects before showing connected. Version 0.9.1 fixed the
+   available). Extract `bundles-windows-x86_64`, then install the **0.9.3** setup
+   executable or MSI. Version 0.9.3 uses a userspace TCP stack and requires
+   returned TCP data plus a DNS reply through the final proxy after capture
+   starts. Version 0.9.2 added explicit routes and route-selection checks. Version 0.9.1 fixed the
    first-connection adapter check; version 0.8.0 does not forward UDP.
 2. Quit the running Aether-GUI from its tray menu. Right-click the newly installed
    app and choose **Run as administrator**. Windows requires elevation to create
@@ -28,7 +29,9 @@ extension. This works with the WireGuard protocol you already use in Aether.
    checked before Windows traffic capture starts. The helper then checks that
    all four IPv4/IPv6 capture routes exist and that Windows selects the virtual
    adapter for representative internet destinations. A conflicting selected
-   interface produces an error instead of a green connected status.
+   interface produces an error instead of a green connected status. The app
+   also checks actual TCP capture/return traffic and performs a DNS query
+   through the proxy chain before showing connected.
 6. Turn off FoxyProxy and other application proxy overrides for a clean test.
    Stop other VPN/TUN apps and restart applications with existing connections.
    No Windows manual proxy setting is needed.
@@ -100,8 +103,11 @@ The app data directory holds local adapter configuration and a recovery record.
 These contain no remote proxy credentials. A disabled adapter left after a
 forced stop is reused only if this app still has its ownership record.
 
-The GUI log includes `[Whole laptop]` startup information, initial tunnel
-traffic and rate-limited warnings/errors. Include those lines when reporting a
+The GUI log includes `[Whole laptop]` startup information, TCP/UDP forwarding
+lines and rate-limited warnings/errors. Successful startup includes both
+`TCP capture and return traffic passed` and `DNS reply through Aether and the
+final proxy received`. If one fails, the app stops capture and reports which
+check failed instead of showing connected. Include those lines when reporting a
 routing failure. A route check verifies Windows' routing decision at startup;
 it cannot prove delivery to every website, and later route changes or software
 that binds a different interface can still affect traffic.
@@ -127,6 +133,16 @@ explicitly use the SOCKS outbound pointing to the existing loopback relay.
 The workflow checks the generated configuration with the **bundled Windows
 executable** before producing installers. It also sends real TCP and UDP
 through a temporary Windows TUN adapter into a loopback SOCKS5 test server.
-That test uses one benchmark-address route and leaves the runner's default
-internet route and DNS configuration alone. See [VERIFICATION.md](VERIFICATION.md)
+That test uses benchmark-address routes and leaves the runner's default
+internet routes and physical-adapter DNS settings unchanged. It also runs
+the production TCP/DNS startup checks with native TUN DNS and strict-route
+filters enabled. A temporary mock upstream answers DNS over TCP via SOCKS;
+production continues to use DNS-over-HTTPS via the real proxy chain. See [VERIFICATION.md](VERIFICATION.md)
 for local test results and outstanding Windows runtime checks.
+
+The gVisor stack handles both TCP and UDP inside sing-box. It avoids the
+additional Windows TCP listener/firewall setup used by the previous mixed
+stack. No physical-adapter firewall setting is disabled. A startup-only local
+echo check has one narrow rule for a reserved benchmark address and ephemeral
+TCP port; its outbound can only reach a loopback listener, which closes after
+the check. Internet connections still use the final-proxy outbound.

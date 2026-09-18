@@ -5,6 +5,9 @@ use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
+mod capture;
+pub use capture::{check_dns, CaptureProbe, CAPTURE_TEST_IP};
+
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
@@ -116,7 +119,9 @@ pub fn config(request: &Request) -> Result<Value, String> {
             // More-specific routes take precedence over an existing /0 even
             // when another interface has the same or a lower default metric.
             "route_address": ["0.0.0.0/1", "128.0.0.0/1", "::/1", "8000::/1"],
-            "dns_mode": "hijack", "stack": "mixed"
+            // Keep TCP in userspace too. The system/mixed TCP stack creates a
+            // Windows listener and silently ignores firewall-setup failures.
+            "dns_mode": "hijack", "stack": "gvisor"
         }],
         "outbounds": [
             {"type": "socks", "tag": "local-final-proxy", "version": "5",
@@ -237,6 +242,7 @@ mod tests {
         let inbound = &c["inbounds"][0];
         assert_eq!(inbound["auto_route"], true);
         assert_eq!(inbound["strict_route"], true);
+        assert_eq!(inbound["stack"], "gvisor");
         assert_eq!(
             inbound["route_address"],
             json!(["0.0.0.0/1", "128.0.0.0/1", "::/1", "8000::/1"])

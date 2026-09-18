@@ -1,4 +1,4 @@
-use super::{config, preflight, Event, Request, HELPER_ARG, INTERFACE_NAME};
+use super::{check_dns, config, preflight, CaptureProbe, Event, Request, HELPER_ARG, INTERFACE_NAME};
 use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -266,7 +266,7 @@ pub fn recover(data_dir: &Path) -> Result<(), String> {
     cleanup(data_dir)
 }
 
-fn prepare(request: &Request) -> Result<PathBuf, String> {
+fn prepare(request: &Request, probe: &CaptureProbe) -> Result<PathBuf, String> {
     cleanup(&request.data_dir)?;
     let existing = powershell(
         "adapter discovery",
@@ -295,9 +295,11 @@ fn prepare(request: &Request) -> Result<PathBuf, String> {
         powershell("adapter activation", "Get-NetAdapter -Name 'AetherWholeLaptop' -IncludeHidden -ErrorAction Stop | Enable-NetAdapter -Confirm:$false -ErrorAction Stop")?;
     }
     let path = request.data_dir.join(CONFIG);
+    let mut configuration = config(request)?;
+    probe.configure(&mut configuration).map_err(|e| e.to_string())?;
     std::fs::write(
         &path,
-        serde_json::to_vec_pretty(&config(request)?).map_err(|e| e.to_string())?,
+        serde_json::to_vec_pretty(&configuration).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
     Ok(path)
@@ -334,7 +336,8 @@ fn serve(request: Request, stop: mpsc::Receiver<()>) -> Result<(), String> {
     supervise_children()?;
     hidden_console()?;
     let result = (|| {
-        let path = prepare(&request)?;
+        let mut probe = Some(CaptureProbe::new().map_err(|e| format!("Cannot prepare TCP capture check: {e}"))?);
+        let path = prepare(&request, probe.as_ref().unwrap())?;
         if stop.try_recv().is_ok() {
             return Ok(());
         }
@@ -363,6 +366,7 @@ fn serve(request: Request, stop: mpsc::Receiver<()>) -> Result<(), String> {
         ) {
             std::thread::spawn(move || {
                 let mut forwarded = 0;
+                let mut traffic_forwarded = 0;
                 let mut last_problem = Instant::now();
                 for line in BufReader::new(reader).lines().map_while(Result::ok) {
                     if line.contains("sing-box started") {
@@ -371,9 +375,15 @@ fn serve(request: Request, stop: mpsc::Receiver<()>) -> Result<(), String> {
                     // Include startup/initial traffic in the GUI log, then
                     // rate-limit problems so busy traffic cannot flood IPC.
                     let problem = line.contains("WARN") || line.contains("ERROR") || line.contains("FATAL");
-                    if forwarded < 24 || (problem && last_problem.elapsed() >= Duration::from_secs(1)) {
+                    // DNS bursts can consume the startup allowance. Reserve a
+                    // separate allowance for actual TCP/UDP forwarding lines.
+                    let traffic = line.contains("inbound connection") || line.contains("outbound connection")
+                        || line.contains("inbound packet connection") || line.contains("outbound packet connection");
+                    if forwarded < 24 || (traffic && traffic_forwarded < 16)
+                        || (problem && last_problem.elapsed() >= Duration::from_secs(1)) {
                         emit(Event::Log(format!("[Whole laptop] {}", line.chars().take(600).collect::<String>())));
                         forwarded += 1;
+                        if traffic { traffic_forwarded += 1; }
                         if problem {
                             last_problem = Instant::now();
                         }
@@ -414,6 +424,23 @@ fn serve(request: Request, stop: mpsc::Receiver<()>) -> Result<(), String> {
                     Ok(details) => emit(Event::Log(format!("[Whole laptop] {}", details.trim()))),
                     Err(error) => break Err(error),
                 }
+                if !matches!(stop.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+                    break Ok(());
+                }
+                emit(Event::Log("[Whole laptop] Checking TCP packet capture and return traffic…".into()));
+                if let Some(check) = probe.take() {
+                    if let Err(error) = check.verify() {
+                        break Err(format!("Windows routes were installed, but TCP data did not return through the virtual adapter: {error}. Whole-laptop networking has been stopped."));
+                    }
+                }
+                if !matches!(stop.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+                    break Ok(());
+                }
+                emit(Event::Log("[Whole laptop] TCP capture and return traffic passed. Checking DNS through Aether and the final proxy…".into()));
+                if let Err(error) = check_dns("172.31.255.2:53".parse().unwrap()) {
+                    break Err(format!("TCP capture passed, but the DNS round trip through Aether and the final proxy failed after capture started: {error}. Whole-laptop networking has been stopped."));
+                }
+                emit(Event::Log("[Whole laptop] DNS reply through Aether and the final proxy received. Whole-laptop checks passed.".into()));
                 emit(Event::Ready);
                 announced = true;
             }
@@ -502,7 +529,7 @@ impl Session {
             input: Some(input),
             events,
             ready: false,
-            deadline: Instant::now() + Duration::from_secs(55),
+            deadline: Instant::now() + Duration::from_secs(90),
             stopped: false,
             logs: VecDeque::new(),
         };
