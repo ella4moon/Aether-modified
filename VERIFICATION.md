@@ -1,5 +1,32 @@
 # Verification of the final-proxy changes
 
+## Windows adapter discovery, version 0.9.1 (2026-09-18)
+
+The reported blank `Windows network recovery failed:` error can occur before
+the TUN adapter is created. The old startup query used `Get-NetAdapter -Name`
+with `-ErrorAction SilentlyContinue`. An absent adapter is expected on first
+connection, but that cmdlet reports it as an error; suppressing the message
+does not make `powershell.exe -Command` return success.
+
+Discovery and cleanup now enumerate adapters and filter by the exact owned
+name. An empty result is accepted, while real enumeration errors stop the
+operation. PowerShell failures include the operation, exit status and available
+output. Redirected output uses UTF-8; bytes emitted before the encoding setting
+are decoded lossily rather than dropping the entire diagnostic.
+
+The Windows whole-laptop tests now exercise:
+
+- The real Windows PowerShell/NetAdapter lookup for an absent adapter.
+- Exact-name filtering with unrelated and similarly named adapters.
+- A genuine enumeration failure, which must remain an error.
+- A failed command with no output, which must still give a useful message.
+- Localized error text through redirected PowerShell output.
+
+The tests are part of the existing native Windows build gate. They do not
+create adapters or change routes. They verify the startup query and diagnostics;
+successful traffic capture on a particular Windows 11 laptop still needs a
+runtime check after installing the new build.
+
 ## Native UDP and whole-laptop UDP, version 0.9.0 (2026-09-15)
 
 | Local check | Result |

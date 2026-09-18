@@ -10,8 +10,10 @@ extension. This works with the WireGuard protocol you already use in Aether.
 
 1. Open the latest successful [build](https://github.com/ella4moon/Aether-modified/actions/workflows/build.yml)
    on `main` (builds now start automatically on updates; **Run workflow** is also
-   available). Extract `bundles-windows-x86_64`, then install the **0.9.0** setup
-   executable or MSI. Version 0.8.0 does not forward UDP.
+   available). Extract `bundles-windows-x86_64`, then install the **0.9.1** setup
+   executable or MSI. Version 0.9.1 fixes the first-connection adapter check that
+   could fail with a blank “Windows network recovery failed” message in 0.9.0.
+   Version 0.8.0 does not forward UDP.
 2. Quit the running Aether-GUI from its tray menu. Right-click the newly installed
    app and choose **Run as administrator**. Windows requires elevation to create
    the adapter and routes. No permanent service or startup task is installed.

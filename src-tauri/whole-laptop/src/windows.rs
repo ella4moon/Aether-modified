@@ -32,6 +32,12 @@ const JOURNAL: &str = "whole-laptop-owner.json";
 const CONFIG: &str = "whole-laptop.json";
 const START_TIMEOUT: Duration = Duration::from_secs(20);
 
+// Get-NetAdapter -Name emits an error when the adapter does not exist yet.
+// SilentlyContinue hides that error but powershell.exe -Command still exits 1.
+// Enumerate and filter instead: absence is normal on the first connection,
+// while a real failure to enumerate adapters must still stop startup/recovery.
+const ADAPTER_QUERY: &str = "Get-NetAdapter -IncludeHidden -ErrorAction Stop | Where-Object { $_.Name -eq 'AetherWholeLaptop' }";
+
 struct Handle(HANDLE);
 impl Drop for Handle {
     fn drop(&mut self) {
@@ -133,31 +139,40 @@ fn hidden_console() -> Result<(), String> {
     Ok(())
 }
 
-fn powershell(script: &str) -> Result<String, String> {
+fn powershell(operation: &str, script: &str) -> Result<String, String> {
     let exe = PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into()))
         .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+    // Windows PowerShell otherwise uses the local code page for redirected
+    // output. Keep localized errors readable, and do not suppress real errors.
+    let script = format!(
+        "$ErrorActionPreference = 'Stop'\n[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n{script}"
+    );
     let mut child = Command::new(exe)
         .args([
             "-NoLogo",
             "-NoProfile",
             "-NonInteractive",
+            "-OutputFormat",
+            "Text",
             "-Command",
-            script,
+            &script,
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Cannot run Windows network recovery: {e}"))?;
+        .map_err(|e| format!("Cannot run Windows network recovery during {operation}: {e}"))?;
     // Drain both pipes while waiting. A verbose error must never deadlock a
     // child while the GUI is trying to restore connectivity.
     fn capture<T: Read + Send + 'static>(mut reader: T) -> std::thread::JoinHandle<String> {
         std::thread::spawn(move || {
-            let mut text = String::new();
-            let _ = reader.by_ref().take(16_384).read_to_string(&mut text);
+            let mut bytes = Vec::new();
+            let _ = reader.by_ref().take(16_384).read_to_end(&mut bytes);
             let _ = std::io::copy(&mut reader, &mut std::io::sink());
-            text
+            // Startup/policy errors can precede our UTF-8 setting. Never lose
+            // the entire message just because it contains a non-UTF-8 byte.
+            String::from_utf8_lossy(&bytes).into_owned()
         })
     }
     let stdout = capture(child.stdout.take().unwrap());
@@ -171,14 +186,26 @@ fn powershell(script: &str) -> Result<String, String> {
                 return if status.success() {
                     Ok(out)
                 } else {
-                    Err(format!("Windows network recovery failed: {}", err.trim()))
+                    let details = [err.trim(), out.trim()]
+                        .into_iter()
+                        .filter(|text| !text.is_empty())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let details = if details.is_empty() {
+                        "PowerShell returned no diagnostic output."
+                    } else {
+                        &details
+                    };
+                    Err(format!(
+                        "Windows network recovery failed during {operation} ({status}): {details}"
+                    ))
                 };
             }
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
             other => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!("Windows network recovery did not finish ({other:?}). Use Restore normal networking, or restart Windows."));
+                return Err(format!("Windows network recovery did not finish during {operation} ({other:?}). Use Restore normal networking, or restart Windows."));
             }
         }
     }
@@ -207,10 +234,8 @@ fn cleanup(data_dir: &Path) -> Result<(), String> {
     }
     // Fixed interface name + ownership journal. Never reset the user's physical
     // interfaces, proxy settings, DNS servers, or routes on another adapter.
-    let remaining = powershell(
-        r#"
-$ErrorActionPreference = 'Stop'
-$adapter = Get-NetAdapter -Name 'AetherWholeLaptop' -IncludeHidden -ErrorAction SilentlyContinue
+    let script = format!("$adapter = {ADAPTER_QUERY}\n")
+        + r#"
 if ($adapter) {
     $adapter | ForEach-Object {
         $_ | Disable-NetAdapter -Confirm:$false -ErrorAction Stop
@@ -221,8 +246,8 @@ if ($adapter) {
     Write-Output 'owned-adapter-retained'
 }
 Clear-DnsClientCache
-"#,
-    )?;
+"#;
+    let remaining = powershell("adapter cleanup", &script)?;
     let _ = std::fs::remove_file(data_dir.join(CONFIG));
     // A forcibly stopped Wintun process can leave its device behind. Retain
     // ownership so the next Connect may enable/reuse just that same device.
@@ -242,7 +267,10 @@ pub fn recover(data_dir: &Path) -> Result<(), String> {
 
 fn prepare(request: &Request) -> Result<PathBuf, String> {
     cleanup(&request.data_dir)?;
-    let existing = powershell("Get-NetAdapter -Name 'AetherWholeLaptop' -IncludeHidden -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name")?;
+    let existing = powershell(
+        "adapter discovery",
+        &format!("{ADAPTER_QUERY} | Select-Object -ExpandProperty Name"),
+    )?;
     if existing.contains(INTERFACE_NAME) && !owned(&request.data_dir)? {
         return Err("An adapter named AetherWholeLaptop already exists without an ownership record. No adapters were changed.".into());
     }
@@ -263,7 +291,7 @@ fn prepare(request: &Request) -> Result<PathBuf, String> {
         journal.sync_all().map_err(|e| e.to_string())?;
     }
     if existing.contains(INTERFACE_NAME) {
-        powershell("$ErrorActionPreference = 'Stop'; Get-NetAdapter -Name 'AetherWholeLaptop' -IncludeHidden | Enable-NetAdapter -Confirm:$false")?;
+        powershell("adapter activation", "Get-NetAdapter -Name 'AetherWholeLaptop' -IncludeHidden -ErrorAction Stop | Enable-NetAdapter -Confirm:$false -ErrorAction Stop")?;
     }
     let path = request.data_dir.join(CONFIG);
     std::fs::write(
@@ -538,6 +566,74 @@ mod tests {
     use windows_sys::Win32::System::Threading::{
         OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
     };
+
+    #[test]
+    fn absent_adapter_is_a_successful_empty_lookup() {
+        // Exercise the real Windows PowerShell/NetAdapter combination. A
+        // unique, absent name models first startup without touching adapters.
+        let absent = format!("AetherMissing-{}", std::process::id());
+        let query = ADAPTER_QUERY.replace(INTERFACE_NAME, &absent);
+        let output = powershell(
+            "adapter discovery",
+            &format!("{query} | Select-Object -ExpandProperty Name"),
+        )
+        .expect("an adapter that has not been created is not a recovery error");
+        assert!(output.trim().is_empty(), "{output}");
+    }
+
+    #[test]
+    fn adapter_query_selects_only_the_owned_name() {
+        // No real adapters are changed. Also cover a similarly named device
+        // so discovery cannot authorize cleanup of another application's TUN.
+        let fixture = r#"
+function Get-NetAdapter {
+    [CmdletBinding()]
+    param([switch]$IncludeHidden)
+    if (!$IncludeHidden) { throw 'Hidden adapters must be included' }
+    @('Ethernet', 'AetherWholeLaptop-other', 'AetherWholeLaptop') | ForEach-Object {
+        [pscustomobject]@{Name = $_}
+    }
+}
+"#;
+        let output = powershell(
+            "adapter discovery",
+            &format!("{fixture}\n{ADAPTER_QUERY} | Select-Object -ExpandProperty Name"),
+        )
+        .unwrap();
+        assert_eq!(output.trim(), INTERFACE_NAME);
+    }
+
+    #[test]
+    fn adapter_enumeration_errors_are_not_treated_as_absence() {
+        let fixture = r#"
+function Get-NetAdapter {
+    [CmdletBinding()]
+    param([switch]$IncludeHidden)
+    Write-Error 'adapter enumeration denied'
+}
+"#;
+        let error = powershell(
+            "adapter discovery",
+            &format!("{fixture}\n{ADAPTER_QUERY} | Select-Object -ExpandProperty Name"),
+        )
+        .unwrap_err();
+        assert!(error.contains("adapter discovery"), "{error}");
+        assert!(error.contains("adapter enumeration denied"), "{error}");
+    }
+
+    #[test]
+    fn powershell_failure_without_output_still_explains_the_failure() {
+        let error = powershell("adapter discovery", "exit 7").unwrap_err();
+        assert!(error.contains("adapter discovery"), "{error}");
+        assert!(error.contains("7"), "{error}");
+        assert!(error.contains("no diagnostic output"), "{error}");
+    }
+
+    #[test]
+    fn powershell_preserves_localized_error_text() {
+        let error = powershell("adapter cleanup", "throw 'Réseau indisponible'").unwrap_err();
+        assert!(error.contains("Réseau indisponible"), "{error}");
+    }
 
     struct ChildGuard(Child);
     impl Drop for ChildGuard {
